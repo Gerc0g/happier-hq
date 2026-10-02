@@ -1,3 +1,4 @@
+import { isHQServerMode, resolveHQCodexInvocation } from '@/integrations/hq/serverPolicy';
 import { accessSync, constants as fsConstants, statSync } from 'node:fs';
 import { resolve } from 'node:path';
 
@@ -75,6 +76,7 @@ export async function resolveCodexCliInvocation(params: Readonly<{
 }>): Promise<Readonly<{ command: string; args: string[] }>> {
     const processEnv = params.processEnv ?? process.env;
     const cwd = params.cwd ?? process.cwd();
+    if (isHQServerMode()) return resolveHQCodexInvocation(params.args, cwd, processEnv);
     const command =
         resolveCodexOverrideCommand(processEnv, params.overrideEnvVarKeys ?? [], cwd)
         ?? requireProviderCliCommand('codex', { processEnv });

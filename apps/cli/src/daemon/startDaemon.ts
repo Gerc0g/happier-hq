@@ -1,3 +1,4 @@
+import { authorizeHQSpawn } from '@/integrations/hq/serverPolicy';
 import fs from 'fs/promises';
 import os from 'os';
 import { randomBytes, randomUUID } from 'node:crypto';
@@ -2904,6 +2905,11 @@ export async function startDaemon(options: Readonly<{ takeover?: boolean }> = {}
             ...options,
             directory: normalizeSpawnSessionDirectory(options.directory, process.env),
           };
+          try {
+            normalizedOptions = await authorizeHQSpawn(normalizedOptions);
+          } catch (error) {
+            return { type: 'error', errorCode: SPAWN_SESSION_ERROR_CODES.UNEXPECTED, errorMessage: error instanceof Error ? error.message : 'HQ refused the session' };
+          }
           const requestedSpawnNonce = normalizeSpawnNonceForAck(normalizedOptions.spawnNonce);
           if (requestedSpawnNonce) {
             normalizedOptions = {

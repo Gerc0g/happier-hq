@@ -44,6 +44,7 @@ export async function collectCodexDirectTranscriptRolloutStreams(params: Readonl
   codexHome: string;
   remoteSessionId: string;
   initialRolloutFiles?: readonly CodexRolloutFile[];
+  includeChildThreads?: boolean;
 }>): Promise<readonly CodexDirectTranscriptRolloutStream[]> {
   const queue = [{ threadId: params.remoteSessionId, sidechainId: null as string | null }];
   const seenThreadIds = new Set<string>();
@@ -68,7 +69,7 @@ export async function collectCodexDirectTranscriptRolloutStreams(params: Readonl
       sidechainId: current.sidechainId,
     })));
 
-    const discoveredChildThreadIds = await discoverSpawnedThreadIdsFromFilesBounded(files);
+    const discoveredChildThreadIds = params.includeChildThreads === false ? [] : await discoverSpawnedThreadIdsFromFilesBounded(files);
     for (const threadId of discoveredChildThreadIds) {
       if (!seenThreadIds.has(threadId)) {
         queue.push({ threadId, sidechainId: threadId });

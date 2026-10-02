@@ -1,3 +1,4 @@
+import { isHQServerMode } from '@/integrations/hq/serverPolicy';
 import { applyPermissionModeToCodexPermissionHandler } from './utils/applyPermissionModeToHandler';
 import { createCodexPermissionHandler, type CodexRuntimePermissionHandler } from './utils/createCodexPermissionHandler';
 import { DiffProcessor } from './utils/diffProcessor';
@@ -511,17 +512,18 @@ export async function runCodex(opts: {
 
     const hasTtyForLocal = Boolean(process.stdin.isTTY && process.stdout.isTTY);
     const startedByForLocalControl = opts.startedBy === 'daemon' ? 'daemon' : 'cli';
-    const codexBackendMode = resolveCodexBackendModeForRun({
+    const hqServerMode = isHQServerMode();
+    const codexBackendMode = hqServerMode ? 'appServer' : resolveCodexBackendModeForRun({
         codexBackendMode: opts.codexBackendMode,
         experimentalCodexAcp: opts.experimentalCodexAcp,
         experimentalCodexAcpEnabledByDefault: isExperimentalCodexAcpEnabled(),
     });
     const experimentalCodexAcpEnabled = codexBackendMode === 'acp';
-    const localControlBackend = codexBackendMode === 'acp' || codexBackendMode === 'appServer'
+    const localControlBackend = !hqServerMode && (codexBackendMode === 'acp' || codexBackendMode === 'appServer')
         ? codexBackendMode
         : null;
     const localControlEnabled = localControlBackend !== null;
-    const codexSharedControlSupport = codexBackendMode === 'appServer'
+    const codexSharedControlSupport = !hqServerMode && codexBackendMode === 'appServer'
         ? await resolveCodexSharedControlSupport({ cwd: requestedDirectory, processEnv: process.env })
         : { ok: false as const, reason: 'unsupported-version' as const };
     const useCodexSharedControl = codexSharedControlSupport.ok;
@@ -542,7 +544,7 @@ export async function runCodex(opts: {
     });
 
     let mode: 'local' | 'remote' = resolveCodexStartingMode({
-        explicitStartingMode: opts.startingMode,
+        explicitStartingMode: hqServerMode ? 'remote' : opts.startingMode,
         startedBy: startedByForLocalControl,
         hasTtyForLocal,
         localControlEnabled,

@@ -1,3 +1,4 @@
+import { isHQServerMode } from '@/integrations/hq/serverPolicy';
 import chalk from 'chalk';
 import { randomUUID } from 'node:crypto';
 
@@ -115,6 +116,7 @@ export async function runBackendSessionCliCommand<Extra extends Record<string, u
   resolveExtraOptions?: (args: string[], parsed: ProviderSessionArgPartitionResult) => Extra;
   resolveDirectConnectedServiceEnvironmentFn?: typeof resolveDirectConnectedServiceEnvironment;
 }): Promise<void> {
+  if (isHQServerMode() && params.agentIdForAccountSettings !== 'codex') throw new Error('HQ server supports Codex only');
   let releaseSessionRunnerLock: (() => Promise<void>) | null = null;
 
   try {
@@ -224,7 +226,7 @@ ${chalk.bold.cyan(`${agentId} CLI Options (from \`${providerHelpCommand}\`):`)}
       });
     }
 
-    const permissionModeSeededByProfile = profileQuery && accountSettingsContext && agentIdForProfiles
+    const permissionModeSeededByProfile = !isHQServerMode() && profileQuery && accountSettingsContext && agentIdForProfiles
       ? (() => {
         const { customProfiles } = readProfilesFromAccountSettings(accountSettingsContext.settings as any);
         const profile = resolveProfileForAgent({ agentId: agentIdForProfiles, query: profileQuery, customProfiles });
@@ -268,7 +270,8 @@ ${chalk.bold.cyan(`${agentId} CLI Options (from \`${providerHelpCommand}\`):`)}
     let runCompleted = false;
     try {
       const shouldResolveDirectConnectedServices =
-        startedBy !== 'daemon'
+        !isHQServerMode()
+        && startedBy !== 'daemon'
         && agentIdForProfiles !== undefined
         && accountSettingsContext !== null
         && !process.env[HAPPIER_SESSION_CONNECTED_SERVICES_BINDINGS_ENV_KEY];

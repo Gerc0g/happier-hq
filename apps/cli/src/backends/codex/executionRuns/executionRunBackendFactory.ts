@@ -1,3 +1,4 @@
+import { isHQServerMode } from '@/integrations/hq/serverPolicy';
 import { readSpawnConfigOptionOverrideValue } from '@happier-dev/protocol';
 
 import { readNonBlankSessionControlIdentifier } from '@/agent/runtime/sessionControlIdentifiers';
@@ -63,13 +64,13 @@ export const executionRunBackendFactory: ExecutionRunBackendFactory = (opts) => 
     : typeof runtimeExtras.codexBackendMode === 'string'
       ? runtimeExtras.codexBackendMode
       : undefined;
-  const transport = selectCodexExecutionRunTransport({
+  const transport = isHQServerMode() ? 'appServer' : selectCodexExecutionRunTransport({
     hasInteractiveTty: Boolean(process.stdin.isTTY && process.stdout.isTTY),
     preferredTransport,
     start: opts.start ?? null,
   });
 
-  if (transport === 'appServer' && probeCodexAppServerExecutionRunAvailability({ env })) {
+  if (transport === 'appServer' && (isHQServerMode() || probeCodexAppServerExecutionRunAvailability({ env }))) {
     return withExecutionRunBackendModelOptions(
       createCodexAppServerExecutionRunBackend({
         cwd: opts.cwd,

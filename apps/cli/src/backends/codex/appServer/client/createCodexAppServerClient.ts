@@ -1,3 +1,4 @@
+import { isHQServerMode } from '@/integrations/hq/serverPolicy';
 import { spawn } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { appendFile, rename, rm, stat } from 'node:fs/promises';
@@ -377,6 +378,7 @@ export async function createCodexAppServerClient(params: Readonly<{
     const rpcLogger = createRpcLogger(sourceProcessEnv);
     const processEnv = sanitizeCodexAppServerEnv(sourceProcessEnv);
     const transport = params.transport ?? { kind: 'stdio' };
+    if (isHQServerMode() && transport.kind !== 'stdio') throw new Error('HQ server requires isolated stdio transport');
     const baseOverrides = params.disableUserMcpServers === true
         ? readCodexMcpServerKeysFromConfigToml(processEnv).map((key) => `mcp_servers.${key}.enabled=false`)
         : [];
@@ -414,7 +416,7 @@ export async function createCodexAppServerClient(params: Readonly<{
             overrideEnvVarKeys: ['HAPPIER_CODEX_APP_SERVER_BIN', 'HAPPIER_CODEX_TUI_BIN', 'HAPPY_CODEX_TUI_BIN'],
             targetLabel: 'Codex app-server',
         });
-        const invocation = appendCodexCliConfigOverridesArgs(baseInvocation, [...baseOverrides, ...(params.configOverrides ?? [])]);
+        const invocation = isHQServerMode() ? baseInvocation : appendCodexCliConfigOverridesArgs(baseInvocation, [...baseOverrides, ...(params.configOverrides ?? [])]);
         const windowsInvocation = resolveWindowsCommandInvocation({
             command: invocation.command,
             args: invocation.args,

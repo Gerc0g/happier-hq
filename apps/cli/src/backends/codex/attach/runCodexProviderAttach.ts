@@ -1,3 +1,4 @@
+import { isHQServerMode } from '@/integrations/hq/serverPolicy';
 import { spawn } from 'node:child_process';
 
 import {
@@ -37,6 +38,7 @@ export async function runCodexProviderAttach(params: Readonly<{
   spawnProcess?: SpawnProcess;
   readEndpointFn?: (params: { happyHomeDir: string; sessionId: string }) => Promise<CodexSharedControlEndpoint | null>;
 }>): Promise<number> {
+  if (isHQServerMode()) return 1;
   if (resolvePersistedCodexRuntimeIdentity(params.metadata)?.backendMode !== 'appServer') return 1;
   const directory = typeof params.metadata.path === 'string' ? params.metadata.path.trim() : '';
   const vendorSessionId = resolvePersistedCodexVendorSessionId(params.metadata);

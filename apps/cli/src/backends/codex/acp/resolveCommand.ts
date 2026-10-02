@@ -1,3 +1,4 @@
+import { isHQServerMode } from '@/integrations/hq/serverPolicy';
 import { accessSync, constants as fsConstants, existsSync, readFileSync } from 'node:fs';
 import { isAbsolute, join, resolve as resolvePath } from 'node:path';
 import { delimiter as pathDelimiter } from 'node:path';
@@ -137,6 +138,7 @@ export function resolveCodexAcpSpawn(opts: ResolveCodexAcpSpawnOptions = {}): Sp
 }
 
 export function resolveCodexAcpSpawnWithOptions(opts: ResolveCodexAcpSpawnOptions = {}): SpawnSpec {
+  if (isHQServerMode()) throw new Error('HQ server requires isolated Codex app-server execution');
   const env = opts.env ?? process.env;
   const currentWorkingDirectory = opts.currentWorkingDirectory ?? process.cwd();
   const envOverride = typeof env.HAPPIER_CODEX_ACP_BIN === 'string'

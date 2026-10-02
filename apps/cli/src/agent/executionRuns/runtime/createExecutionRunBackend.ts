@@ -1,3 +1,4 @@
+import { assertHQExecutionBackend } from '@/integrations/hq/serverPolicy';
 import type { AgentBackend, McpServerConfig } from '@/agent/core/AgentBackend';
 import type { AcpPermissionHandler } from '@/agent/acp/AcpBackend';
 import type { AgentPromptPayload } from '@/agent/core/AgentPromptPayload';
@@ -285,6 +286,7 @@ export function createExecutionRunBackend(opts: Readonly<{
   let acquiredIsolationCleanup: (() => void | Promise<void>) | null = null;
   try {
     const backendId = String(opts.backendId ?? '').trim();
+    assertHQExecutionBackend(backendId, opts.backendTarget);
     const accountSettings = resolveExecutionRunAccountSettings({
       backendTarget: opts.backendTarget,
       accountSettings: opts.accountSettings,

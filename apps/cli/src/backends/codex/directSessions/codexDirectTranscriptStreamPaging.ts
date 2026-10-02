@@ -421,6 +421,7 @@ export async function pageCodexRolloutStreams(params: Readonly<{
   maxBytes: number;
   maxItems: number;
   initialRolloutFiles?: readonly CodexRolloutFile[];
+  includeChildThreads?: boolean;
 }>): Promise<Readonly<{
   items: DirectTranscriptRawMessageV1[];
   nextCursor: string | null;
@@ -433,6 +434,7 @@ export async function pageCodexRolloutStreams(params: Readonly<{
     codexHome: params.codexHome,
     remoteSessionId: params.remoteSessionId,
     initialRolloutFiles: params.initialRolloutFiles,
+    includeChildThreads: params.includeChildThreads,
   })];
 
   if (params.direction !== 'older') {
@@ -446,7 +448,7 @@ export async function pageCodexRolloutStreams(params: Readonly<{
   const discoveryByStreamId = new Map<string, CodexStreamDiscovery>();
   const discoveredChildThreadIdsByProvenance = new Map<string, readonly string[]>();
   const rolloutFilesByThreadId = new Map<string, readonly CodexRolloutFile[]>();
-  if (decoded?.v === 4) {
+  if (decoded?.v === 4 && params.includeChildThreads !== false) {
     let pending = decoded.streams.filter((persisted) => !knownStreamIds.has(persisted.fileRelPath));
     while (pending.length > 0) {
       const deferred: typeof pending = [];
@@ -530,7 +532,7 @@ export async function pageCodexRolloutStreams(params: Readonly<{
         hasLoadedCandidateByStreamId.set(stream.fileRelPath, true);
       }
       candidateRecords.push(...projected.records);
-      for (const childThreadId of projected.discoveredChildThreadIds) {
+      for (const childThreadId of params.includeChildThreads === false ? [] : projected.discoveredChildThreadIds) {
         if (discoveredThreadIds.has(childThreadId)) continue;
         discoveredThreadIds.add(childThreadId);
         const childFiles = await collectCodexSessionRolloutFiles({

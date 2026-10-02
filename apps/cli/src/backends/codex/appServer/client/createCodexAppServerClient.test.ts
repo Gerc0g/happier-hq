@@ -28,7 +28,8 @@ vi.mock('node:child_process', async (importOriginal) => {
 
 describe('createCodexAppServerClient', () => {
     it('speaks JSON-RPC over the shared app-server Unix WebSocket', async () => {
-        await withTempDir('happier-codex-app-server-client-websocket-', async (root) => {
+        // macOS Unix sockets have a 104-byte path limit; the temporary root itself is long.
+        await withTempDir('codex-ws-', async (root) => {
             const socketPath = process.platform === 'win32'
                 ? `\\\\.\\pipe\\happier-codex-test-${process.pid}-${Date.now()}`
                 : join(root, 'app-server.sock');

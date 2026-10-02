@@ -51,6 +51,7 @@ import { recoverDaemonTerminalSessionMutationJournals } from './session/mutation
 
 import type { DaemonToServerEvents, ServerToDaemonEvents } from './machine/socketTypes';
 import { authorizeMachineRpcRequest } from './machine/machineRpcAuthorization';
+import { registerMachineHqRpcHandlers } from './machine/rpcHandlers.hq';
 import { projectMachineRpcTransportAcknowledgement } from './machine/projectMachineRpcTransportAcknowledgement';
 import { registerMachineRpcHandlers, type MachineRpcHandlerDeps, type MachineRpcHandlers } from './machine/rpcHandlers';
 import { resolveMachineRpcWorkingDirectory } from './machine/resolveMachineRpcWorkingDirectory';
@@ -359,6 +360,7 @@ export class ApiMachineClient {
             projectTransportAcknowledgement: projectMachineRpcTransportAcknowledgement,
         });
 
+        registerMachineHqRpcHandlers({ rpcHandlerManager: this.rpcHandlerManager });
         const machineRpcWorkingDirectory = resolveMachineRpcWorkingDirectory();
         const filesystemAccessPolicy = resolveFilesystemAccessPolicy();
         this.machineRpcWorkingDirectory = machineRpcWorkingDirectory;

@@ -171,6 +171,9 @@ export interface NewSessionDraft {
     launchUserAttemptId?: string;
     selectedMachineId: string | null;
     selectedPath: string | null;
+    hqChatType?: 'work' | 'research';
+    hqWorktreeTask?: string;
+    hqWorktreeCreation?: Readonly<{ machineId: string; serverId: string; repoPath: string; taskName: string; requestId?: string; beforeIds?: readonly string[] }> | null;
     entryIntent?: 'session' | 'automation' | null;
     checkoutCreationDraft?: NewSessionCheckoutCreationDraft | null;
     selectedProfileId: string | null;
@@ -1683,4 +1686,12 @@ export function clearPersistence(): void | Promise<void> {
         })();
     }
     mmkv.clearAll();
+}
+
+export function loadHqChatType(): 'work' | 'research' {
+    return getPersistenceStorage().getString('hq.lastChatType') === 'research' ? 'research' : 'work';
+}
+
+export function saveHqChatType(type: 'work' | 'research'): void {
+    getPersistenceStorage().set('hq.lastChatType', type);
 }

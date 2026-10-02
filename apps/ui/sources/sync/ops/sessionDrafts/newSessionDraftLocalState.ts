@@ -1,6 +1,9 @@
 import type { NewSessionDraft } from '@/sync/domains/state/persistence';
 
 export type NewSessionDraftLocalState = Readonly<Pick<NewSessionDraft,
+    | 'hqChatType'
+    | 'hqWorktreeTask'
+    | 'hqWorktreeCreation'
     | 'entryIntent'
     | 'selectedSecretId'
     | 'selectedSecretIdByProfileIdByEnvVarName'
@@ -13,6 +16,9 @@ export type NewSessionDraftLocalState = Readonly<Pick<NewSessionDraft,
 /** Fields that remain device-local while the canonical authoring document is synchronized. */
 export function buildNewSessionDraftLocalState(draft: NewSessionDraft): NewSessionDraftLocalState {
     return {
+        hqChatType: draft.hqChatType,
+        hqWorktreeTask: draft.hqWorktreeTask,
+        hqWorktreeCreation: draft.hqWorktreeCreation,
         entryIntent: draft.entryIntent ?? null,
         selectedSecretId: draft.selectedSecretId ?? null,
         selectedSecretIdByProfileIdByEnvVarName: draft.selectedSecretIdByProfileIdByEnvVarName ?? null,

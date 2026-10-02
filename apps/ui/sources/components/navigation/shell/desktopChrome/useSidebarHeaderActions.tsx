@@ -1,4 +1,5 @@
 import { useRouter } from 'expo-router';
+import { isHqWorkspaceEnabled } from '@/sync/domains/hq/hqRuntime';
 import * as React from 'react';
 import { View } from 'react-native';
 import { useUnistyles } from 'react-native-unistyles';
@@ -26,6 +27,7 @@ export function useSidebarHeaderActions(): SidebarHeaderActionsResult {
     const styles = desktopSidebarChromeStyles;
     const { theme } = useUnistyles();
     const router = useRouter();
+    const settingsPath = isHqWorkspaceEnabled() ? '/hq/settings' : '/settings';
     const resolveNewSessionOrdinaryEntryRoute = useResolveNewSessionOrdinaryEntryRoute();
     const friendRequestCount = useFriendRequestCount();
     const friendsEnabled = useFriendsEnabled();
@@ -81,7 +83,7 @@ export function useSidebarHeaderActions(): SidebarHeaderActionsResult {
                     <Icon name="sliders-horizontal" size={ICON_SIZE.md} color={theme.colors.chrome.header.foreground} />
                 </View>
             ),
-            onPress: () => navigate('/settings', 'SidebarView.nav.settings'),
+            onPress: () => navigate(settingsPath, 'SidebarView.nav.settings'),
         });
 
         out.push({
@@ -101,6 +103,7 @@ export function useSidebarHeaderActions(): SidebarHeaderActionsResult {
         friendRequestCount,
         friendsEnabled,
         navigate,
+        settingsPath,
         navigateToNewSession,
         styles.badge,
         styles.badgeText,
@@ -119,12 +122,13 @@ export function useSidebarHeaderActions(): SidebarHeaderActionsResult {
             title: t('settings.title'),
             inlineTestID: 'nav-settings',
             icon: 'sliders-horizontal' as const,
-            onPress: () => navigate('/settings', 'SidebarView.nav.settings'),
+            onPress: () => navigate(settingsPath, 'SidebarView.nav.settings'),
         });
 
         return out;
     }, [
         navigate,
+        settingsPath,
         styles.badge,
         styles.badgeText,
         styles.topIndicatorDot,

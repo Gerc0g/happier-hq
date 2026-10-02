@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { I18nManager, Platform, Pressable, View } from 'react-native';
+import { I18nManager, Platform, Pressable, ScrollView, View } from 'react-native';
 import { StyleSheet, useUnistyles } from 'react-native-unistyles';
 
 import { FocusRing, WEB_FOCUS_OUTLINE_RESET } from '@/components/ui/interaction/FocusRing';
@@ -53,6 +53,8 @@ export type SegmentedTabBarProps<T extends string = string> = Readonly<{
     testIDPrefix?: string;
     /** Compact mode with reduced padding and smaller font */
     compact?: boolean;
+    /** Keep complete labels and scroll horizontally when the available width is too small. */
+    scrollable?: boolean;
 }>;
 
 const stylesheet = StyleSheet.create((theme) => ({
@@ -63,6 +65,15 @@ const stylesheet = StyleSheet.create((theme) => ({
         backgroundColor: theme.colors.segmentedControl.trackBackground,
         borderRadius: 9,
         padding: 2,
+    },
+    scrollContent: { flexGrow: 1 },
+    scrollableInner: { flexGrow: 1 },
+    scrollableTab: {
+        flexBasis: 'auto',
+        flexGrow: 1,
+        flexShrink: 0,
+        minHeight: Platform.OS === 'android' ? 48 : 44,
+        paddingHorizontal: theme.margins.md,
     },
     innerCompact: {
         borderRadius: 7,
@@ -114,6 +125,13 @@ function SegmentedTabBarInner<T extends string>(props: SegmentedTabBarProps<T>) 
     const compact = props.compact;
     const keyboardModality = useIsKeyboardModality();
     const [focusedTabId, setFocusedTabId] = React.useState<T | null>(null);
+    const scrollRef = React.useRef<ScrollView>(null);
+    const tabOffsets = React.useRef(new Map<T, number>());
+    const revealActiveTab = React.useCallback(() => {
+        const x = tabOffsets.current.get(props.activeTabId);
+        if (props.scrollable && x !== undefined) scrollRef.current?.scrollTo({ x, animated: false });
+    }, [props.activeTabId, props.scrollable]);
+    React.useEffect(revealActiveTab, [revealActiveTab]);
     const tabRefs = React.useRef(new Map<T, React.ElementRef<typeof Pressable>>());
     const handleTabKeyDown = (index: number, event: React.KeyboardEvent) => {
         const direction = event.key === 'ArrowRight' ? (I18nManager.isRTL ? -1 : 1)
@@ -131,81 +149,101 @@ function SegmentedTabBarInner<T extends string>(props: SegmentedTabBarProps<T>) 
     // Icons replace labels only when the whole bar is iconic; a half-iconic row reads as broken.
     const iconOnly = props.tabs.length > 0 && props.tabs.every((tab) => tab.icon != null);
 
+    const content = (
+        <View
+            style={[styles.inner, compact ? styles.innerCompact : null, props.scrollable ? styles.scrollableInner : null]}
+            accessibilityRole="tablist"
+        >
+            {props.tabs.map((tab, tabIndex) => {
+                const active = props.activeTabId === tab.id;
+                const badgeCount = tab.badgeCount ?? 0;
+                const accessibleName = tab.accessibilityLabel ?? tab.label;
+                const content = iconOnly ? (
+                    <View style={styles.tabIcon}>{tab.icon}</View>
+                ) : (
+                    <Text numberOfLines={props.scrollable ? 1 : undefined} style={[styles.tabLabel, compact ? styles.tabLabelCompact : null, active ? styles.tabLabelActive : null]}>{tab.label}</Text>
+                );
+                return (
+                    <Pressable
+                        key={tab.id}
+                        onLayout={props.scrollable ? (event) => {
+                            tabOffsets.current.set(tab.id, event.nativeEvent.layout.x);
+                            if (tab.id === props.activeTabId) revealActiveTab();
+                        } : undefined}
+                        ref={(node) => {
+                            if (node) tabRefs.current.set(tab.id, node);
+                            else tabRefs.current.delete(tab.id);
+                        }}
+                        {...(Platform.OS === 'web' ? {
+                            tabIndex: active ? 0 : -1,
+                            onKeyDown: (event: React.KeyboardEvent) => handleTabKeyDown(tabIndex, event),
+                            onFocus: () => setFocusedTabId(tab.id),
+                            onBlur: () => setFocusedTabId((current) => current === tab.id ? null : current),
+                        } : {})}
+                        testID={props.testIDPrefix ? `${props.testIDPrefix}:${tab.id}` : undefined}
+                        onPress={() => props.onSelectTab(tab.id)}
+                        style={[
+                            styles.tab,
+                            props.scrollable ? styles.scrollableTab : null,
+                            compact ? styles.tabCompact : null,
+                            Platform.OS === 'android' ? { minHeight: 48 } : null,
+                            active ? styles.tabActive : null,
+                            Platform.OS === 'web' ? WEB_FOCUS_OUTLINE_RESET : null,
+                        ]}
+                        accessibilityRole="tab"
+                        accessibilityState={{ selected: active }}
+                        aria-selected={active}
+                        // The label is still the accessible name when the glyph replaces it,
+                        // and it doubles as the native tooltip on web.
+                        accessibilityLabel={iconOnly || tab.accessibilityLabel ? accessibleName : undefined}
+                        {...(iconOnly ? ({ title: accessibleName } as object) : {})}
+                    >
+                        {active ? (
+                            <GradientSurface
+                                fallbackColor={theme.colors.segmentedControl.activeBackground}
+                                gradient={theme.colors.segmentedControl.activeGradient}
+                                borderRadius={compact ? 5 : 7}
+                                style={StyleSheet.absoluteFillObject}
+                            />
+                        ) : null}
+                        {badgeCount > 0 ? (
+                            <View style={styles.tabBadgeAnchor}>
+                                {content}
+                                <TabBadge
+                                    variant="count"
+                                    value={badgeCount}
+                                    tone="neutral"
+                                    testID={props.testIDPrefix ? `${props.testIDPrefix}:${tab.id}:badge` : undefined}
+                                />
+                            </View>
+                        ) : content}
+                        {Platform.OS === 'web' && (keyboardModality || focusedTabId === tab.id) ? (
+                            <FocusRing
+                                testID={props.testIDPrefix ? `${props.testIDPrefix}:${tab.id}:focus-ring` : undefined}
+                                visible={keyboardModality && focusedTabId === tab.id}
+                                placement={props.scrollable ? 'inside' : undefined}
+                                radius={compact ? 5 : 7}
+                            />
+                        ) : null}
+                    </Pressable>
+                );
+            })}
+        </View>
+    );
     return (
         <View style={styles.container}>
-            <View
-                style={[styles.inner, compact ? styles.innerCompact : null]}
-                accessibilityRole="tablist"
-            >
-                {props.tabs.map((tab, tabIndex) => {
-                    const active = props.activeTabId === tab.id;
-                    const badgeCount = tab.badgeCount ?? 0;
-                    const accessibleName = tab.accessibilityLabel ?? tab.label;
-                    const content = iconOnly ? (
-                        <View style={styles.tabIcon}>{tab.icon}</View>
-                    ) : (
-                        <Text style={[styles.tabLabel, compact ? styles.tabLabelCompact : null, active ? styles.tabLabelActive : null]}>{tab.label}</Text>
-                    );
-                    return (
-                        <Pressable
-                            key={tab.id}
-                            ref={(node) => {
-                                if (node) tabRefs.current.set(tab.id, node);
-                                else tabRefs.current.delete(tab.id);
-                            }}
-                            {...(Platform.OS === 'web' ? {
-                                tabIndex: active ? 0 : -1,
-                                onKeyDown: (event: React.KeyboardEvent) => handleTabKeyDown(tabIndex, event),
-                                onFocus: () => setFocusedTabId(tab.id),
-                                onBlur: () => setFocusedTabId((current) => current === tab.id ? null : current),
-                            } : {})}
-                            testID={props.testIDPrefix ? `${props.testIDPrefix}:${tab.id}` : undefined}
-                            onPress={() => props.onSelectTab(tab.id)}
-                            style={[
-                                styles.tab,
-                                compact ? styles.tabCompact : null,
-                                Platform.OS === 'android' ? { minHeight: 48 } : null,
-                                active ? styles.tabActive : null,
-                                Platform.OS === 'web' ? WEB_FOCUS_OUTLINE_RESET : null,
-                            ]}
-                            accessibilityRole="tab"
-                            accessibilityState={{ selected: active }}
-                            aria-selected={active}
-                            // The label is still the accessible name when the glyph replaces it,
-                            // and it doubles as the native tooltip on web.
-                            accessibilityLabel={iconOnly || tab.accessibilityLabel ? accessibleName : undefined}
-                            {...(iconOnly ? ({ title: accessibleName } as object) : {})}
-                        >
-                            {active ? (
-                                <GradientSurface
-                                    fallbackColor={theme.colors.segmentedControl.activeBackground}
-                                    gradient={theme.colors.segmentedControl.activeGradient}
-                                    borderRadius={compact ? 5 : 7}
-                                    style={StyleSheet.absoluteFillObject}
-                                />
-                            ) : null}
-                            {badgeCount > 0 ? (
-                                <View style={styles.tabBadgeAnchor}>
-                                    {content}
-                                    <TabBadge
-                                        variant="count"
-                                        value={badgeCount}
-                                        tone="neutral"
-                                        testID={props.testIDPrefix ? `${props.testIDPrefix}:${tab.id}:badge` : undefined}
-                                    />
-                                </View>
-                            ) : content}
-                            {Platform.OS === 'web' && (keyboardModality || focusedTabId === tab.id) ? (
-                                <FocusRing
-                                    testID={props.testIDPrefix ? `${props.testIDPrefix}:${tab.id}:focus-ring` : undefined}
-                                    visible={keyboardModality && focusedTabId === tab.id}
-                                    radius={compact ? 5 : 7}
-                                />
-                            ) : null}
-                        </Pressable>
-                    );
-                })}
-            </View>
+            {props.scrollable ? (
+                <ScrollView
+                    ref={scrollRef}
+                    testID={props.testIDPrefix ? `${props.testIDPrefix}:scroll` : undefined}
+                    onLayout={revealActiveTab}
+                    horizontal
+                    contentContainerStyle={styles.scrollContent}
+                    showsHorizontalScrollIndicator
+                >
+                    {content}
+                </ScrollView>
+            ) : content}
         </View>
     );
 }

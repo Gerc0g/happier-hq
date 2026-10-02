@@ -42,6 +42,8 @@ import { DesktopSettingsSection } from '@/components/settings/desktop/DesktopSet
 import { SettingsBelowFoldSections } from '@/components/settings/SettingsBelowFoldSections';
 import { runAfterInteractionsWithFallback } from '@/utils/timing/runAfterInteractionsWithFallback';
 import { Icon } from '@/components/ui/icons/Icon';
+import { isHqWorkspaceEnabled } from '@/sync/domains/hq/hqRuntime';
+import { runGuardedNavigation } from '@/utils/navigation/runGuardedNavigation';
 
 const DEFER_BELOW_FOLD_SETTINGS_SECTIONS_DELAY_MS = 0;
 const DEFER_BELOW_FOLD_SETTINGS_STAGE_DELAY_MS = 16;
@@ -300,6 +302,14 @@ export const SettingsView = React.memo(function SettingsView() {
 
     return (
         <ItemList style={{ paddingTop: 0 }}>
+            {isHqWorkspaceEnabled() ? <ItemGroup>
+                <Item
+                    testID="settings-hq-agents"
+                    title={t('hq.agent.title')}
+                    icon={<Icon name="sliders-horizontal" size={29} color={theme.colors.accent.blue} />}
+                    onPress={() => { void runGuardedNavigation(() => router.push('/hq/settings')); }}
+                />
+            </ItemGroup> : null}
             {/* App Info Header */}
             <View style={{ maxWidth: layout.maxWidth, alignSelf: 'center', width: '100%' }}>
                 <View style={{ alignItems: 'center', paddingVertical: 24, backgroundColor: theme.colors.surface.base, marginTop: 16, borderRadius: 12, marginHorizontal: 16 }}>

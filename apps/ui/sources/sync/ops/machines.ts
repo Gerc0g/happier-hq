@@ -854,7 +854,7 @@ export async function machineBash(
     machineId: string,
     command: MachineBashRequest,
     cwd: string,
-    options?: { serverId?: string | null }
+    options?: { serverId?: string | null; onIssued?: () => void }
 ): Promise<{
     success: boolean;
     stdout: string;
@@ -877,6 +877,7 @@ export async function machineBash(
             method: 'bash',
             payload,
             serverId: options?.serverId,
+            ...(options?.onIssued ? { onIssued: options.onIssued } : {}),
         });
         return result;
     } catch (error) {

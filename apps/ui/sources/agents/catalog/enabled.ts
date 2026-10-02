@@ -1,3 +1,4 @@
+import { isHqWorkspaceEnabled } from '@/sync/domains/hq/hqRuntime';
 import { buildBackendTargetKey } from '@happier-dev/protocol';
 import type { AgentId } from '@/agents/registry/registryCore';
 import { AGENT_IDS } from '@/agents/registry/registryCore';
@@ -6,6 +7,7 @@ export function isAgentEnabled(params: {
     agentId: AgentId;
     backendEnabledByTargetKey: Record<string, boolean> | null | undefined;
 }): boolean {
+    if (isHqWorkspaceEnabled()) return params.agentId === 'codex';
     const targetKey = buildBackendTargetKey({ kind: 'builtInAgent', agentId: params.agentId });
     return params.backendEnabledByTargetKey?.[targetKey] !== false;
 }

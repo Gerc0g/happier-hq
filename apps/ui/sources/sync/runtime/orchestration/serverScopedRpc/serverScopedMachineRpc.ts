@@ -110,6 +110,7 @@ export async function machineRpcWithServerScope<R, A>(params: ServerScopedMachin
         }
         : undefined;
     const runOnce = async (options?: { forceScoped?: boolean }): Promise<R> => {
+        const assertActiveContextCurrent = apiSocket.captureMachineRpcContextGuard();
         const context = await resolveServerScopedContext({
             machineId: params.machineId,
             serverId: params.serverId,
@@ -118,6 +119,7 @@ export async function machineRpcWithServerScope<R, A>(params: ServerScopedMachin
         });
 
         if (context.scope === 'active' && params.preferScoped !== true) {
+            assertActiveContextCurrent();
             let abandonedBeforeEmission = false;
             const activeOnIssued = onIssued
                 ? () => {

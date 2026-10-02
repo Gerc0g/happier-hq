@@ -1,3 +1,4 @@
+import { isHqWorkspaceEnabled } from '@/sync/domains/hq/hqRuntime';
 import { buildBackendTargetKey, isBuiltInAgentTarget, type AcpCatalogSettingsV1, type BackendTargetRefV1 } from '@happier-dev/protocol';
 
 import type { AgentId } from '@/agents/catalog/catalog';
@@ -22,7 +23,9 @@ export function getResolvedBackendCatalogEntries(params: Readonly<{
     backendEnabledByTargetKey?: Readonly<Record<string, boolean>> | null;
     collapseConfiguredBackendProviderSentinels?: boolean;
 }>): ResolvedBackendCatalogEntry[] {
-    const builtIns: ResolvedBackendCatalogEntry[] = params.enabledAgentIds
+    const hqMode = isHqWorkspaceEnabled();
+    const enabledIds: readonly AgentId[] = hqMode ? ['codex'] : params.enabledAgentIds;
+    const builtIns: ResolvedBackendCatalogEntry[] = enabledIds
         .filter((agentId) => agentId !== 'customAcp')
         .map((agentId) => {
             const core = getAgentCore(agentId);
@@ -39,6 +42,7 @@ export function getResolvedBackendCatalogEntries(params: Readonly<{
             };
         });
 
+    if (hqMode) return builtIns;
     const catalog = normalizeAcpCatalogSettingsV1(
         params.acpCatalogSettingsV1 ?? { v: 2, backends: [] },
     );

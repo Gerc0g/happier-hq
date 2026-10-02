@@ -1,3 +1,4 @@
+import { isHqWorkspaceEnabled } from '@/sync/domains/hq/hqRuntime';
 import * as React from 'react';
 import { View } from 'react-native';
 import { usePathname } from 'expo-router';
@@ -5,7 +6,7 @@ import { useIsFocused } from '@react-navigation/native';
 import { StyleSheet, useUnistyles } from 'react-native-unistyles';
 import { SessionGettingStartedGuidance } from '@/components/sessions/guidance/SessionGettingStartedGuidance';
 import { useSessionListStorageKind } from '@/components/sessions/model/useSessionListStorageKind';
-import { SessionsListStorageChrome } from '@/components/sessions/shell/SessionsListStorageChrome';
+import { SessionsListStorageChrome, type HqSessionListView } from '@/components/sessions/shell/SessionsListStorageChrome';
 import {
     useVisibleSessionListPaneState,
     type VisibleSessionListViewDataOptions,
@@ -115,6 +116,7 @@ const SessionsListWrapperContent = React.memo((props: { pathname: string; surfac
     const { theme } = useUnistyles();
     const isFocused = useIsFocused();
     const { directSessionsEnabled, storageKind, setStorageKind } = useSessionListStorageKind();
+    const [hqView, setHqView] = React.useState<HqSessionListView>('projects');
     const newSessionDrafts = useNewSessionDraftProjections();
     const pathname = props.pathname;
     const surfaceRoutePathname = props.surfaceRoutePathname;
@@ -222,18 +224,20 @@ const SessionsListWrapperContent = React.memo((props: { pathname: string; surfac
             directSessionsEnabled={directSessionsEnabled}
             storageKind={storageKind}
             onSelectStorageKind={setStorageKind}
+            hqNavigation={isHqWorkspaceEnabled() ? { view: hqView, onSelectView: setHqView, pathname } : undefined}
         />
     );
     const sessionListContent = React.useMemo(
         () => (
             <SessionsListContent
                 storageKind={storageKind}
+                hqView={hqView}
                 data={sessionListViewData}
                 pathname={pathname}
                 surfaceOwnership={surfaceOwnership}
             />
         ),
-        [pathname, sessionListViewData, storageKind, surfaceOwnership],
+        [hqView, pathname, sessionListViewData, storageKind, surfaceOwnership],
     );
 
     if (!surfaceOwnership.visible) {
@@ -241,7 +245,7 @@ const SessionsListWrapperContent = React.memo((props: { pathname: string; surfac
     }
 
     let content: React.ReactNode;
-    if (sessionListViewData === null) {
+    if ((!isHqWorkspaceEnabled() || storageKind === 'direct') && sessionListViewData === null) {
         content = (
             <View style={styles.container}>
                 {storageChrome}
@@ -252,7 +256,7 @@ const SessionsListWrapperContent = React.memo((props: { pathname: string; surfac
                 </View>
             </View>
         );
-    } else if (visibleSessionCount === 0 && newSessionDrafts.length === 0) {
+    } else if ((!isHqWorkspaceEnabled() || storageKind === 'direct') && visibleSessionCount === 0 && newSessionDrafts.length === 0) {
         content = (
             <View style={styles.container}>
                 {storageChrome}

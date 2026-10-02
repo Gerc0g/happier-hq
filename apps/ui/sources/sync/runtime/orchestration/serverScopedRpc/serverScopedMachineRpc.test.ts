@@ -3,7 +3,7 @@ import { RPC_ERROR_CODES } from '@happier-dev/protocol/rpc';
 import { SOCKET_RPC_EVENTS } from '@happier-dev/protocol/socketRpc';
 import { resetScopedMachineDataKeyCacheForTests } from './serverScopedRpcPool';
 import { syncPerformanceTelemetry } from '@/sync/runtime/syncPerformanceTelemetry';
-import { createServerFetchWithReachabilityProbe } from '@/dev/testkit';
+import { createDeferred, createServerFetchWithReachabilityProbe } from '@/dev/testkit';
 
 const machineRpcSpy = vi.hoisted(() => vi.fn());
 const createEphemeralSocketSpy = vi.hoisted(() => vi.fn());
@@ -26,6 +26,7 @@ vi.mock('@/sync/api/session/apiSocket', async (importOriginal) => {
     return {
         ...actual,
         apiSocket: {
+            captureMachineRpcContextGuard: () => actual.apiSocket.captureMachineRpcContextGuard(),
             machineRPC: (...args: unknown[]) => activeApiSocketHarness.useReal
                 ? actual.apiSocket.machineRPC(...args as [string, string, unknown, any])
                 : machineRpcSpy(...args),
@@ -284,6 +285,79 @@ describe('machineRpcWithServerScope', () => {
         expect(createEphemeralSocketSpy).not.toHaveBeenCalled();
     });
 
+    it.each(['relay', 'account'] as const)('rejects an active %s that changed while resolving the explicit server scope', async (change) => {
+        getActiveServerSnapshotSpy.mockReturnValue({
+            serverId: 'server-a', serverUrl: 'https://server-a.example.test', kind: 'custom', generation: 1,
+        });
+        const changedEmitWithAck = vi.fn(async () => ({ ok: true, result: 'response' }));
+        installRealActiveMachineRpc({
+            machineEncryption: {
+                encryptRaw: vi.fn(async () => 'encrypted-command'),
+                decryptRaw: vi.fn(async () => ({ success: true })),
+            },
+            socket: { timeout: vi.fn(() => ({ emitWithAck: changedEmitWithAck })) },
+        });
+        const { machineRpcWithServerScope } = await import('./serverScopedMachineRpc');
+        const outcome = machineRpcWithServerScope({
+            machineId: 'machine-1', serverId: 'server-a', method: 'bash', payload: { argv: ['hq', 'entity', 'show', 'co'] }, onIssued: vi.fn(),
+        }).then(() => null, (error: unknown) => error);
+        // resolveServerScopedContext has picked A and returned its promise;
+        // its caller has not yet resumed to access the mutable active socket.
+        if (change === 'relay') {
+            getActiveServerSnapshotSpy.mockReturnValue({
+                serverId: 'server-b', serverUrl: 'https://server-b.example.test', kind: 'custom', generation: 2,
+            });
+        } else {
+            activeApiSocketHarness.real.encryption = { getMachineEncryption: () => ({
+                encryptRaw: async () => 'new-account-encrypted-command', decryptRaw: async () => ({ success: true }),
+            }) };
+        }
+        const error = await outcome;
+        expect(changedEmitWithAck).not.toHaveBeenCalled();
+        expect(error).toBeInstanceOf(Error);
+        expect(createEphemeralSocketSpy).not.toHaveBeenCalled();
+    });
+
+    it.each(['relay', 'account'] as const)('does not emit an HQ update through a changed %s while encryption is pending', async (change) => {
+        getActiveServerSnapshotSpy.mockReturnValue({
+            serverId: 'server-a', serverUrl: 'https://server-a.example.test', kind: 'custom', generation: 1,
+        });
+        const encrypted = createDeferred<string>();
+        const encrypting = createDeferred<void>();
+        const activeEmitWithAck = vi.fn(async () => ({ ok: true, result: 'response' }));
+        installRealActiveMachineRpc({
+            machineEncryption: {
+                encryptRaw: vi.fn(() => { encrypting.resolve(); return encrypted.promise; }),
+                decryptRaw: vi.fn(async () => ({ success: true, exitCode: 0, stdout: '{}', stderr: '' })),
+            },
+            socket: { timeout: vi.fn(() => ({ emitWithAck: activeEmitWithAck })) },
+        });
+        const { machineRpcWithServerScope } = await import('./serverScopedMachineRpc');
+        const onIssued = vi.fn();
+        const outcome = machineRpcWithServerScope({
+            machineId: 'machine-1', serverId: 'server-a', method: 'bash',
+            payload: { argv: ['hq', 'entity', 'update', 'co/app', '--json-base64', 'payload'], cwd: '/' },
+            onIssued,
+        }).then(() => null, (error: unknown) => error);
+        await encrypting.promise;
+        const changedEmitWithAck = vi.fn(async () => ({ ok: true, result: 'response' }));
+        activeApiSocketHarness.real.socket = { timeout: vi.fn(() => ({ emitWithAck: changedEmitWithAck })) };
+        if (change === 'relay') {
+            getActiveServerSnapshotSpy.mockReturnValue({
+                serverId: 'server-b', serverUrl: 'https://server-b.example.test', kind: 'custom', generation: 2,
+            });
+        } else {
+            activeApiSocketHarness.real.encryption = { getMachineEncryption: () => null };
+        }
+        encrypted.resolve('old-account-encrypted-command');
+        const error = await outcome;
+        expect(changedEmitWithAck).not.toHaveBeenCalled();
+        expect(activeEmitWithAck).not.toHaveBeenCalled();
+        expect(error).toBeInstanceOf(Error);
+        expect(onIssued).not.toHaveBeenCalled();
+        expect(createEphemeralSocketSpy).not.toHaveBeenCalled();
+    });
+
     it('does not fall back after an exact active emission times out', async () => {
         vi.useFakeTimers();
         getActiveServerSnapshotSpy.mockReturnValue({
@@ -320,6 +394,29 @@ describe('machineRpcWithServerScope', () => {
         expect(activeEmitWithAck).toHaveBeenCalledTimes(1);
         expect(createEphemeralSocketSpy).not.toHaveBeenCalled();
         vi.useRealTimers();
+    });
+
+    it('does not issue an HQ worktree creation again after losing the emitted command response', async () => {
+        vi.useFakeTimers();
+        getActiveServerSnapshotSpy.mockReturnValue({
+            serverId: 'server-a', serverUrl: 'https://server-a.example.test', kind: 'custom', generation: 1,
+        });
+        const activeEmitWithAck = vi.fn(() => new Promise<unknown>(() => {}));
+        installRealActiveMachineRpc({
+            machineEncryption: {
+                encryptRaw: vi.fn(async () => 'encrypted-hq-command'),
+                decryptRaw: vi.fn(async () => ({ success: true, exitCode: 0, stdout: '/worktrees/fix', stderr: '' })),
+            },
+            socket: { timeout: vi.fn(() => ({ emitWithAck: activeEmitWithAck })), emitWithAck: activeEmitWithAck },
+        });
+        installScopedFallback();
+        const { createHqWorktree } = await import('@/sync/ops/hq');
+        const result = createHqWorktree({ machineId: 'machine-1', company: 'chimera', product: 'aetheria', repo: 'AI', path: '/AI' }, 'fix', 'server-a');
+        const expectation = expect(result).rejects.toMatchObject({ kind: 'commandFailed' });
+        await vi.advanceTimersByTimeAsync(30_000);
+        await expectation;
+        expect(activeEmitWithAck).toHaveBeenCalledTimes(1);
+        expect(createEphemeralSocketSpy).not.toHaveBeenCalled();
     });
 
     it('prevents a timed-out active preparation from emitting after exact scoped fallback starts', async () => {

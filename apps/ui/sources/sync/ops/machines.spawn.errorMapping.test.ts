@@ -306,6 +306,44 @@ describe('machineSpawnNewSession error mapping', () => {
     expect(resolveCall?.payload).toEqual({ spawnNonce: spawnCall?.payload?.spawnNonce });
   });
 
+  it('confirms an opaque HQ build through the caller nonce and reuses completed custody without transferring the first input', async () => {
+    const machine = storage.getState().machines['machine-1'];
+    storage.setState({ machines: {
+      'machine-1': { ...machine, daemonState: { startedWithCliVersion: '0.2.13-hq.20260928' } },
+    } });
+    let acceptedNonce: string | undefined;
+    machineRpcWithServerScopeMock.mockImplementation(async ({ method, payload }) => {
+      if (method === RPC_METHODS.SPAWN_HAPPY_SESSION_PROVIDER_SAFE) {
+        acceptedNonce = payload.spawnNonce;
+        return { type: 'success', sessionIdStatus: 'pending', spawnNonce: acceptedNonce };
+      }
+      return acceptedNonce && payload.spawnNonce === acceptedNonce
+        ? { status: 'success', sessionId: 'confirmed-hq-session' }
+        : { status: 'error', errorCode: SPAWN_SESSION_ERROR_CODES.INVALID_REQUEST, errorMessage: 'Launch identity mismatch' };
+    });
+
+    const { machineSpawnNewSession } = await import('./machines');
+    const options = {
+      machineId: 'machine-1',
+      serverId: 'server-b',
+      directory: '/tmp',
+      backendTarget: { kind: 'builtInAgent' as const, agentId: 'codex' as const },
+      accountSettingsVersionHint: 12,
+      spawnNonce: 'caller-hq-launch',
+      userAttemptId: 'caller-hq-attempt',
+      firstTurnLocalId: 'caller-first-turn',
+      pendingFirstInput: { text: 'first turn', localId: 'caller-first-turn' },
+    };
+    const result = await machineSpawnNewSession(options);
+    expect(result).toMatchObject({ type: 'success', sessionId: 'confirmed-hq-session', pendingFirstInputTransferred: false });
+    expect(machineRpcWithServerScopeMock.mock.calls[0]?.[0].payload).not.toHaveProperty('pendingFirstInput');
+    await expect(machineSpawnNewSession(options)).resolves.toMatchObject({
+      type: 'success', sessionId: 'confirmed-hq-session', pendingFirstInputTransferred: false,
+      spawnAttemptCustody: { spawnNonce: 'caller-hq-launch', firstTurnLocalId: 'caller-first-turn' },
+    });
+    expect(machineRpcWithServerScopeMock.mock.calls.filter(([request]) => request.method === RPC_METHODS.SPAWN_HAPPY_SESSION_PROVIDER_SAFE)).toHaveLength(1);
+  });
+
   it('returns a terminal child-exit failure and clears launch custody without waiting for timeout', async () => {
     const errorMessage = 'Child process exited before session webhook (pid=8892, code=1, signal=null)';
     machineRpcWithServerScopeMock

@@ -1,4 +1,5 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { clearActiveUnsavedChangesGuard, setActiveUnsavedChangesGuard } from '@/utils/navigation/runGuardedNavigation';
 import { renderHook } from '@/dev/testkit';
 import { installNavigationShellCommonModuleMocks } from '../navigationShellTestHelpers';
 
@@ -43,7 +44,31 @@ vi.mock('@/hooks/server/useFriendsEnabled', () => ({
     useFriendsEnabled: () => shellFeatureState.friendsEnabled,
 }));
 
+afterEach(() => { vi.unstubAllEnvs(); clearActiveUnsavedChangesGuard(); vi.clearAllMocks(); });
+
 describe('useSidebarHeaderActions', () => {
+    it('opens HQ settings from both header presentations and honors unsaved changes', async () => {
+        vi.stubEnv('EXPO_PUBLIC_HAPPIER_HQ_ENABLED', '1');
+        const { useSidebarHeaderActions } = await import('./useSidebarHeaderActions');
+        const hook = await renderHook(() => useSidebarHeaderActions());
+        const settings = [hook.getCurrent().headerActions, hook.getCurrent().topUtilityActions]
+            .map(actions => actions.find(action => action.id === 'settings')!);
+        setActiveUnsavedChangesGuard({ isDirtyRef: { current: true }, tag: 'settings', requestDecision: async () => 'keepEditing' });
+        for (const action of settings) action.onPress?.();
+        await Promise.resolve();
+        expect(routerPushSpy).not.toHaveBeenCalled();
+        clearActiveUnsavedChangesGuard();
+        for (const action of settings) action.onPress?.();
+        expect(routerPushSpy.mock.calls).toEqual([['/hq/settings'], ['/hq/settings']]);
+    });
+
+    it('keeps ordinary settings when HQ is disabled', async () => {
+        vi.stubEnv('EXPO_PUBLIC_HAPPIER_HQ_ENABLED', '0');
+        const { useSidebarHeaderActions } = await import('./useSidebarHeaderActions');
+        const hook = await renderHook(() => useSidebarHeaderActions());
+        hook.getCurrent().headerActions.find(action => action.id === 'settings')?.onPress?.();
+        expect(routerPushSpy).toHaveBeenCalledWith('/settings');
+    });
     it('exposes only implemented sidebar header actions when social and inbox actions are unavailable', async () => {
         const { useSidebarHeaderActions } = await import('./useSidebarHeaderActions');
 

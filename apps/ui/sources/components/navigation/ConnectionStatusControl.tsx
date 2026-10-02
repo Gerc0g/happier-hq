@@ -412,7 +412,9 @@ export const ConnectionStatusControl = React.memo(function ConnectionStatusContr
         targets: serverTargets,
         activeTargetKey,
         onSelectTarget: (target) => {
-            void switchTarget(target);
+            // Relay selection changes the account scope without removing the current route.
+            // Ask the active editor before any selection, daemon intent, or auth state changes.
+            void runGuardedNavigation(() => { void switchTarget(target); });
         },
         selectedColor: theme.colors.status.connected,
         iconColor: theme.colors.text.primary,

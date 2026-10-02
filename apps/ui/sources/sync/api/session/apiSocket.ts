@@ -403,6 +403,17 @@ class ApiSocket {
         });
     }
 
+    captureMachineRpcContextGuard(): () => void {
+        const snapshot = getActiveServerSnapshot();
+        const encryption = this.encryption;
+        return () => {
+            const current = getActiveServerSnapshot();
+            if (current.generation !== snapshot.generation || current.serverId !== snapshot.serverId || this.encryption !== encryption) {
+                throw new Error('Machine RPC context changed before emission');
+            }
+        };
+    }
+
     /**
      * RPC call for machines - uses legacy/global encryption (for now)
      */
@@ -416,16 +427,22 @@ class ApiSocket {
             onIssued?: () => void;
         },
     ): Promise<R> {
-        const machineEncryption = this.encryption!.getMachineEncryption(machineId);
+        const assertContextCurrent = this.captureMachineRpcContextGuard();
+        const machineEncryption = this.encryption?.getMachineEncryption(machineId);
         if (!machineEncryption) {
             throw new Error(`Machine encryption not found for ${machineId}`);
         }
+
+        const encryptedPayload = await machineEncryption.encryptRaw(params);
+        // Encryption can outlive a relay/account switch. Never send the old
+        // account's command through the mutable socket of the new context.
+        assertContextCurrent();
 
         const result: any = await this.emitWithAck(
             SOCKET_RPC_EVENTS.CALL,
             buildSocketRpcCallPayload({
                 method: `${machineId}:${method}`,
-                payload: await machineEncryption.encryptRaw(params),
+                payload: encryptedPayload,
                 timeoutMs: options?.timeoutMs,
                 authorization: options?.authorization,
             }),

@@ -1,3 +1,4 @@
+import { isHqWorkspaceEnabled } from '@/sync/domains/hq/hqRuntime';
 import * as React from 'react';
 import { View, Pressable } from 'react-native';
 import { StyleSheet, useUnistyles } from 'react-native-unistyles';
@@ -13,13 +14,12 @@ import { HiddenInactiveSessionsEmptyState } from '@/components/sessions/guidance
 import { SessionsListContent } from '@/components/sessions/shell/SessionsList';
 import { readSessionIdFromPathname } from '@/components/sessions/shell/readSessionIdFromPathname';
 import { useSessionListStorageKind } from '@/components/sessions/model/useSessionListStorageKind';
-import { SessionsListStorageChrome } from '@/components/sessions/shell/SessionsListStorageChrome';
+import { SessionsListStorageChrome, type HqSessionListView } from '@/components/sessions/shell/SessionsListStorageChrome';
 import {
     resolveSessionListSurfaceOwnership,
     resolveSidebarSessionListSurfaceInteractive,
     SESSION_LIST_SURFACE_OWNER_SIDEBAR,
 } from '@/components/sessions/shell/surface/sessionListSurfaceOwnership';
-import { FABWide } from '@/components/ui/buttons/FABWide';
 import { InboxView } from '@/components/navigation/shell/InboxView';
 import { FriendsView } from '@/components/navigation/shell/FriendsView';
 import { SessionsListWrapper } from '@/components/sessions/shell/SessionsListWrapper';
@@ -301,8 +301,7 @@ const SidebarMainViewContent = React.memo(function SidebarMainViewContent({
 }>) {
     const { theme } = useUnistyles();
     const { directSessionsEnabled, storageKind, setStorageKind } = useSessionListStorageKind();
-    const router = useRouter();
-    const resolveNewSessionOrdinaryEntryRoute = useResolveNewSessionOrdinaryEntryRoute();
+    const [hqView, setHqView] = React.useState<HqSessionListView>('projects');
     const activeSessionId = React.useMemo(() => readSessionIdFromPathname(pathname), [pathname]);
     const surfaceOwnership = React.useMemo(
         () => resolveSessionListSurfaceOwnership({
@@ -322,23 +321,17 @@ const SidebarMainViewContent = React.memo(function SidebarMainViewContent({
         sessionListSurfaceDataActive: surfaceOwnership.dataActive,
     });
 
-    const handleNewSession = React.useCallback((event?: unknown) => {
-        const { draftId, draftOrigin } = resolveNewSessionOrdinaryEntryRoute({
-            forceFresh: shouldForceFreshNewSessionEntryFromPressEvent(event),
-        });
-        router.push({ pathname: '/new', params: { draftId, draftOrigin } });
-    }, [resolveNewSessionOrdinaryEntryRoute, router]);
-
     const storageChrome = (
         <SessionsListStorageChrome
             directSessionsEnabled={directSessionsEnabled}
             storageKind={storageKind}
             onSelectStorageKind={setStorageKind}
+            hqNavigation={isHqWorkspaceEnabled() ? { view: hqView, onSelectView: setHqView, pathname } : undefined}
         />
     );
 
     let content: React.ReactNode;
-    if (sessionListViewData === null) {
+    if ((!isHqWorkspaceEnabled() || storageKind === 'direct') && sessionListViewData === null) {
         content = (
             <View style={styles.sidebarContainer}>
                 {storageChrome}
@@ -349,7 +342,7 @@ const SidebarMainViewContent = React.memo(function SidebarMainViewContent({
                 </View>
             </View>
         );
-    } else if (visibleSessionCount === 0) {
+    } else if ((!isHqWorkspaceEnabled() || storageKind === 'direct') && visibleSessionCount === 0) {
         const suppressSidebarGuidance = isTablet && pathname === '/';
         content = (
             <View style={styles.sidebarContainer}>
@@ -377,6 +370,7 @@ const SidebarMainViewContent = React.memo(function SidebarMainViewContent({
                 <View style={styles.sidebarContentContainer}>
                     <SessionsListContent
                         storageKind={storageKind}
+                        hqView={hqView}
                         data={sessionListViewData}
                         pathname={pathname}
                         surfaceOwnership={surfaceOwnership}
@@ -386,12 +380,7 @@ const SidebarMainViewContent = React.memo(function SidebarMainViewContent({
         );
     }
 
-    return (
-        <>
-            {content}
-            <FABWide onPress={handleNewSession} />
-        </>
-    );
+    return content;
 });
 
 const PhoneMainViewContent = React.memo(function PhoneMainViewContent({

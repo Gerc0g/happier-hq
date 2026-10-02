@@ -19,11 +19,16 @@ vi.mock('@/sync/runtime/orchestration/serverScopedRpc/createEphemeralServerSocke
   createEphemeralServerSocketClient: (...args: unknown[]) => createEphemeralSocketSpy(...args),
 }));
 
-vi.mock('@/sync/api/session/apiSocket', () => ({
-  apiSocket: {
-    machineRPC: (...args: unknown[]) => machineRpcSpy(...args),
-  },
-}));
+vi.mock('@/sync/api/session/apiSocket', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/sync/api/session/apiSocket')>();
+  return {
+    ...actual,
+    apiSocket: {
+      captureMachineRpcContextGuard: () => actual.apiSocket.captureMachineRpcContextGuard(),
+      machineRPC: (...args: unknown[]) => machineRpcSpy(...args),
+    },
+  };
+});
 
 vi.mock('@/auth/storage/tokenStorage', () => ({
   TokenStorage: {

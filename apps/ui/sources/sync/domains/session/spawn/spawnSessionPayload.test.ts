@@ -211,6 +211,27 @@ describe('buildSpawnHappySessionRpcParams', () => {
         })).toHaveProperty('pendingFirstInput', options.pendingFirstInput);
     });
 
+    it('preserves caller-owned launch identity for the deployed opaque HQ daemon version', () => {
+        const params = buildCompatibleSpawnHappySessionRpcParams({
+            options: {
+                machineId: 'machine-1',
+                directory: '/home/agent/Desktop/WikiPedik/research',
+                backendTarget: { kind: 'builtInAgent', agentId: 'codex' },
+                spawnNonce: 'caller-owned-launch',
+                pendingFirstInput: { text: 'prompt', localId: 'first-turn-1' },
+            },
+            // Observed in the active VPS daemon's startedWithCliVersion.
+            daemonCliVersion: '0.2.13-hq.20260928',
+        });
+
+        expect(params).toMatchObject({
+            spawnNonce: 'caller-owned-launch',
+            backendTarget: { kind: 'builtInAgent', agentId: 'codex' },
+        });
+        // An opaque build identity does not establish optional first-input support.
+        expect(params).not.toHaveProperty('pendingFirstInput');
+    });
+
     // A creation ingress that drops `sourceContext` produces an ordinary blank
     // Session and reports success — a silent, invisible wrong outcome. This
     // payload owner is the UI half of the "no ingress drops the recipe" invariant.

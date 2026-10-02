@@ -742,6 +742,49 @@ describe('ConnectionStatusControl (native popover config)', () => {
         }
     });
 
+    it.each(['server', 'group'] as const)('preserves unsaved context before a user-initiated %s switch', async (kind) => {
+        const previousScope = process.env.EXPO_PUBLIC_HAPPY_STORAGE_SCOPE;
+        process.env.EXPO_PUBLIC_HAPPY_STORAGE_SCOPE = `guard_${Date.now()}_${kind}`;
+        vi.resetModules();
+        const guard = await import('@/utils/navigation/runGuardedNavigation');
+        try {
+            const profiles = await import('@/sync/domains/server/serverProfiles');
+            const local = profiles.upsertServerProfile({ serverUrl: 'https://local.example.test', name: 'Local' });
+            const company = profiles.upsertServerProfile({ serverUrl: 'https://company.example.test', name: 'Company' });
+            profiles.setActiveServerId(local.id, { scope: 'device' });
+            settingsState.serverSelectionGroups = [{ id: 'guarded', name: 'Guarded group', serverIds: [company.id], presentation: 'grouped' }];
+            const ConnectionStatusControl = await importConnectionStatusControl();
+            const screen = await renderScreen(React.createElement(ConnectionStatusControl, { variant: 'sidebar' }));
+            const isDirtyRef = { current: true };
+            const requestDecision = vi.fn<() => Promise<'keepEditing' | 'discard'>>().mockResolvedValue('keepEditing');
+            const onDiscard = vi.fn();
+            guard.setActiveUnsavedChangesGuard({ isDirtyRef, requestDecision, onDiscard, tag: 'entity-test' });
+            await pressTestInstanceAsync(screen.findByProps({ accessibilityRole: 'button' }));
+            const targetId = kind === 'server' ? `target-use-server-${company.id}` : 'target-use-group-guarded';
+            await act(async () => { await selectConnectionTarget(targetId); });
+            expect(requestDecision).toHaveBeenCalledTimes(1);
+            expect(profiles.getActiveServerId()).toBe(local.id);
+            expect(settingsState.serverSelectionActiveTargetKind).toBeNull();
+            expect(settingsState.serverSelectionActiveTargetId).toBeNull();
+            expect(connectionMocks.switchConnectionToActiveServer).not.toHaveBeenCalled();
+            const intent = await import('@/setup/directRelaySelectionIntent');
+            expect(intent.consumeDirectRelaySelectionIntent(company.id)).toBe(false);
+            expect(isDirtyRef.current).toBe(true);
+
+            requestDecision.mockResolvedValue('discard');
+            await act(async () => { await selectConnectionTarget(targetId); });
+            expect(onDiscard).toHaveBeenCalledTimes(1);
+            expect(isDirtyRef.current).toBe(false);
+            expect(profiles.getActiveServerId()).toBe(company.id);
+            expect(settingsState.serverSelectionActiveTargetKind).toBe(kind);
+            expect(connectionMocks.switchConnectionToActiveServer).toHaveBeenCalledTimes(1);
+        } finally {
+            guard.clearActiveUnsavedChangesGuard();
+            if (previousScope === undefined) delete process.env.EXPO_PUBLIC_HAPPY_STORAGE_SCOPE;
+            else process.env.EXPO_PUBLIC_HAPPY_STORAGE_SCOPE = previousScope;
+        }
+    });
+
     it('switches server without reload by using runtime switch handlers', async () => {
         const previousScope = process.env.EXPO_PUBLIC_HAPPY_STORAGE_SCOPE;
         const scope = `test_${Date.now()}_${Math.random().toString(16).slice(2)}`;

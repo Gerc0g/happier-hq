@@ -1,3 +1,6 @@
+import { HqSessionsPane } from '@/components/sessions/hq/HqSessionsPane';
+import type { HqSessionListView } from './SessionsListStorageChrome';
+import { isHqWorkspaceEnabled } from '@/sync/domains/hq/hqRuntime';
 import React from 'react';
 import {
     View,
@@ -596,12 +599,23 @@ export function SessionsList(props: Readonly<{
     );
 }
 
-export const SessionsListContent = React.memo(function SessionsListContent(props: Readonly<{
+type SessionsListContentProps = Readonly<{
     storageKind?: SessionListStorageFilter;
+    hqView?: HqSessionListView;
     data: SessionListViewItem[] | null;
     pathname?: string;
     surfaceOwnership?: Partial<SessionListSurfaceOwnership>;
-}>) {
+}>;
+
+export const SessionsListContent = React.memo(function SessionsListContent(props: SessionsListContentProps) {
+    const pathname = usePathname();
+    const history = <SessionsHistoryListContent {...props} />;
+    if (!isHqWorkspaceEnabled() || props.storageKind === 'direct') return history;
+    const ownership = normalizeSessionListSurfaceOwnership(props.surfaceOwnership);
+    return <HqSessionsPane data={props.data} pathname={props.pathname ?? pathname} active={ownership.dataActive} interactive={ownership.interactive} view={props.hqView ?? 'projects'} history={history} />;
+});
+
+const SessionsHistoryListContent = React.memo(function SessionsHistoryListContent(props: SessionsListContentProps) {
     const styles = stylesheet;
     const { theme } = useUnistyles();
     const safeArea = useSafeAreaInsets();

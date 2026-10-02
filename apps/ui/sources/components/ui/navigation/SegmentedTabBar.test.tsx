@@ -1,6 +1,6 @@
 import * as React from 'react';
 import { act } from 'react-test-renderer';
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { SegmentedTab } from './SegmentedTabBar';
 import { installNavigationCommonModuleMocks } from './navigationTestHelpers';
@@ -58,9 +58,49 @@ function requireTabLabel(screen: RenderedScreen, testID: string): string {
 }
 
 describe('SegmentedTabBar', () => {
-    it('moves selection and host focus with arrows, Home and End through a single tab stop', async () => {
-        const listeners = new Map<string, (event: unknown) => void>();
+    const listeners = new Map<string, (event: unknown) => void>();
+    // The modality store binds its host listeners once, on the first rendered tab bar.
+    beforeEach(() => {
         vi.stubGlobal('document', { addEventListener: (type: string, listener: (event: unknown) => void) => listeners.set(type, listener) });
+    });
+
+    it('reveals an overflowing tab selected programmatically after layout in either direction', async () => {
+        const { SegmentedTabBar } = await import('./SegmentedTabBar');
+        const viewportWidth = 288;
+        const tabWidth = 180;
+        const contentWidth = TABS.length * tabWidth;
+        let scrollX = 0;
+        const renderBar = (activeTabId: 'alpha' | 'beta' | 'gamma') => (
+            <SegmentedTabBar scrollable tabs={TABS} activeTabId={activeTabId} onSelectTab={() => {}} testIDPrefix="seg" />
+        );
+        const screen = await renderScreen(renderBar('alpha'), {
+            // React Native owns measurement and clamps scrolling to the available content.
+            createNodeMock: (element) => element.type === 'ScrollView' ? {
+                scrollTo: ({ x }: { x: number }) => {
+                    scrollX = Math.max(0, Math.min(x, contentWidth - viewportWidth));
+                },
+            } : null,
+        });
+        await act(async () => {
+            screen.findByType('ScrollView').props.onLayout?.({ nativeEvent: { layout: { x: 0, y: 0, width: viewportWidth, height: 48 } } });
+            for (const [index, tab] of TABS.entries()) {
+                requireTab(screen, `seg:${tab.id}`).props.onLayout?.({
+                    nativeEvent: { layout: { x: index * tabWidth, y: 0, width: tabWidth, height: 44 } },
+                });
+            }
+        });
+
+        await screen.update(renderBar('gamma'));
+        expect(requireTab(screen, 'seg:gamma').props.accessibilityState.selected).toBe(true);
+        expect(scrollX).toBeLessThanOrEqual(2 * tabWidth);
+        expect(scrollX + viewportWidth).toBeGreaterThanOrEqual(3 * tabWidth);
+
+        await screen.update(renderBar('alpha'));
+        expect(requireTab(screen, 'seg:alpha').props.accessibilityState.selected).toBe(true);
+        expect(scrollX).toBe(0);
+    });
+
+    it('moves selection and host focus with arrows, Home and End through a single tab stop', async () => {
         const { SegmentedTabBar } = await import('./SegmentedTabBar');
         let focused: string | undefined;
         function Harness() {
@@ -117,7 +157,6 @@ describe('SegmentedTabBar', () => {
         await nativeScreen.pressByTestIdAsync('seg:beta');
         expect(requireTab(nativeScreen, 'seg:beta').props.accessibilityState.selected).toBe(true);
         Platform.OS = platformOS;
-        vi.unstubAllGlobals();
     });
 
     it('renders all tab labels', async () => {

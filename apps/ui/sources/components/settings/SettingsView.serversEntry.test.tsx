@@ -405,4 +405,15 @@ describe('SettingsView', () => {
 
         expect(screen.findRowByTitle('settings.rateUs')).toBeNull();
     });
+
+    it('offers HQ agent controls in general settings when the workspace is enabled', async () => {
+        vi.stubEnv('EXPO_PUBLIC_HAPPIER_HQ_ENABLED', '1');
+        try {
+            const screen = await renderSettingsViewUnderTest();
+            expect(screen.findRowByTitle('hq.agent.title')).toBeTruthy();
+            await screen.pressRowByTitle('hq.agent.title');
+            expect(shared.routerPushSpy).toHaveBeenCalledWith('/hq/settings');
+        } finally { vi.unstubAllEnvs(); }
+    });
+
 });

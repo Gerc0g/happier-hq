@@ -291,22 +291,12 @@ describe('MainView sidebar actions', () => {
         MainView = mainViewModule.MainView;
     }, 120_000);
 
-    it('renders the wide start-new-session CTA in the sidebar instead of header action buttons', async () => {
-        let tree: renderer.ReactTestRenderer | null = null;
-        tree = (await renderScreen(<MainView variant="sidebar" />)).tree;
+    it('does not duplicate the sidebar header new-session action with a floating button', async () => {
+        const screen = await renderScreen(<MainView variant="sidebar" />);
 
-        const fab = tree!.findByType('FABWide');
-        fab.props.onPress({ nativeEvent: { ctrlKey: true } });
-
-        expect(routerPushSpy).toHaveBeenCalledWith({
-            pathname: '/new',
-            params: {
-                draftId: expect.any(String),
-                draftOrigin: 'ordinary',
-            },
-        });
-        expect(() => findPressableByLabel(tree!, 'New session')).toThrow();
-        expect(() => findPressableByLabel(tree!, 'Open automations')).toThrow();
+        expect(screen.findAllByType('FABWide')).toHaveLength(0);
+        expect(() => findPressableByLabel(screen.tree, 'New session')).toThrow();
+        expect(() => findPressableByLabel(screen.tree, 'Open automations')).toThrow();
     });
 
     it('keeps the phone sessions header new-session action', async () => {

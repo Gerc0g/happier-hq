@@ -60,6 +60,7 @@ async function createHarness() {
   const machineResolveSpawnSessionByNonceSpy = vi.fn(async (): Promise<ResolveSpawnSessionTestResult> => ({ status: 'not_found' }));
   const machineResolveSpawnSessionByNonceUntilSettledSpy = vi.fn(async (_params: unknown): Promise<ResolveSpawnSessionTestResult> => ({ status: 'not_found' }));
   const modalConfirmSpy = vi.fn(async () => false);
+  const applySettingsSpy = vi.fn();
   const completeMachineSpawnAttemptCustodySpy = vi.fn(async () => true);
   const reconcileSpawnAttemptCustodyFromOperationSpy = vi.fn(async (params: {
     outcome: { kind: 'succeeded'; createdSessionId: string } | { kind: 'failed' | 'cancelled' };
@@ -100,7 +101,8 @@ async function createHarness() {
   const clearSessionDraftLaunchCurrentnessSpy = vi.fn(() => true);
   const markActionOperationSeenSpy = vi.fn(() => true);
   const storageState = {
-    settings: {},
+    settings: {} as Partial<Settings>,
+    artifacts: {} as Record<string, { body: string }>,
     machines: { m1: { id: 'm1' } },
     sessions: {} as Record<string, { id: string }>,
     updateSessionPermissionMode: vi.fn(),
@@ -144,7 +146,7 @@ async function createHarness() {
     },
   }));
   vi.doMock('@/sync/store/settingsWriters', () => ({
-    useApplySettings: () => vi.fn(),
+    useApplySettings: () => applySettingsSpy,
   }));
   vi.doMock('@/sync/domains/state/persistence', () => ({
     clearNewSessionDraft: vi.fn(),
@@ -246,7 +248,6 @@ async function createHarness() {
     const actual = await vi.importActual<typeof import('@/agents/catalog/catalog')>('@/agents/catalog/catalog');
     return {
       ...actual,
-      getAgentCore: vi.fn(() => ({ model: { supportsSelection: false } })),
       buildSpawnEnvironmentVariablesFromUiState: vi.fn((opts: { environmentVariables?: Record<string, string> }) => opts.environmentVariables),
       buildSpawnSessionExtrasFromUiState: vi.fn(() => ({})),
       getAgentResumeExperimentsFromSettings: vi.fn(() => ({})),
@@ -297,6 +298,9 @@ async function createHarness() {
   }));
   const { useCreateNewSession } = await import('./useCreateNewSession');
   const reset = () => {
+    applySettingsSpy.mockReset();
+    storageState.settings = {};
+    storageState.artifacts = {};
     modalAlertSpy.mockReset();
     modalConfirmSpy.mockReset().mockResolvedValue(false);
     machineSpawnNewSessionSpy.mockReset().mockResolvedValue({
@@ -358,6 +362,7 @@ async function createHarness() {
     useCreateNewSession,
     modalAlertSpy,
     modalConfirmSpy,
+    applySettingsSpy,
     completeMachineSpawnAttemptCustodySpy,
     reconcileSpawnAttemptCustodyFromOperationSpy,
     machineSpawnNewSessionSpy,
@@ -375,6 +380,41 @@ async function createHarness() {
 }
 
 type Harness = Awaited<ReturnType<typeof createHarness>>;
+type CreateSessionParams = Parameters<Harness['useCreateNewSession']>[0];
+
+function createSessionParams(overrides: Partial<CreateSessionParams> = {}): CreateSessionParams {
+  return {
+    draftId: '8e0a5dd1-b1df-43dd-b51e-b7787b30362e',
+    launchIntentSignature: 'test-launch-intent',
+    router: { push: vi.fn(), replace: vi.fn() },
+    selectedMachineId: 'm1',
+    selectedPath: '/tmp',
+    selectedMachine: { id: 'm1', active: true, activeAt: Date.now(), metadata: { host: 'devbox' } },
+    setIsCreating: vi.fn(),
+    setIsResumeSupportChecking: vi.fn(),
+    settings: { experiments: false } as unknown as Settings,
+    useProfiles: false,
+    selectedProfileId: null,
+    profileMap: new Map(),
+    recentMachinePaths: [],
+    agentType: 'codex',
+    permissionMode: 'default',
+    modelMode: 'default',
+    promptStore: createNewSessionPromptStore(''),
+    resumeSessionId: '',
+    agentNewSessionOptions: null,
+    machineEnvPresence: { isPreviewEnvSupported: false, isLoading: false, meta: {}, refreshedAt: null, refresh: () => {} },
+    secrets: [],
+    secretBindingsByProfileId: {},
+    selectedSecretIdByProfileIdByEnvVarName: {},
+    sessionOnlySecretValueByProfileIdByEnvVarName: {},
+    selectedMachineCapabilities: {},
+    targetServerId: null,
+    allowedTargetServerIds: undefined,
+    ...overrides,
+  };
+}
+
 let sharedHarness: Harness | null = null;
 
 async function setupHarness(): Promise<Harness> {
@@ -619,62 +659,124 @@ describe('useCreateNewSession (daemon unavailable UX)', () => {
 
   it('uses the latest requested path getter even before the committed selectedPath rerenders', async () => {
     const { useCreateNewSession, machineSpawnNewSessionSpy } = await setupHarness();
-
     const requestedPathRef = { current: '/home/happier/projects/subdir' };
-    const setIsCreating = vi.fn();
-    const settings = { experiments: false } as unknown as Settings;
-    const machineEnvPresence: UseMachineEnvPresenceResult = {
-      isPreviewEnvSupported: false,
-      isLoading: false,
-      meta: {},
-      refreshedAt: null,
-      refresh: () => {},
-    };
-
-    const hook = await renderHook(() =>
-      useCreateNewSession({
-        draftId: '8e0a5dd1-b1df-43dd-b51e-b7787b30362e',
-        launchIntentSignature: 'test-launch-intent',
-        router: { push: vi.fn(), replace: vi.fn() },
-        selectedMachineId: 'm1',
-        selectedPath: '/home/happier',
-        getRequestedPath: () => requestedPathRef.current,
-        selectedMachine: { id: 'm1', active: true, activeAt: Date.now(), metadata: { host: 'devbox' } },
-        setIsCreating,
-        setIsResumeSupportChecking: vi.fn(),
-        settings,
-        useProfiles: false,
-        selectedProfileId: null,
-        profileMap: new Map(),
-        recentMachinePaths: [],
-        agentType: 'opencode' as any,
-        permissionMode: 'default' as PermissionMode,
-        modelMode: 'default' as ModelMode,
-        promptStore: createNewSessionPromptStore(''),
-        resumeSessionId: '',
-        agentNewSessionOptions: null,
-        machineEnvPresence,
-        secrets: [],
-        secretBindingsByProfileId: {},
-        selectedSecretIdByProfileIdByEnvVarName: {},
-        sessionOnlySecretValueByProfileIdByEnvVarName: {},
-        selectedMachineCapabilities: {},
-        targetServerId: null,
-        allowedTargetServerIds: undefined,
-      }),
-    );
-
-    let createPromise: Promise<void> | void;
-    await act(async () => {
-      createPromise = hook.getCurrent().handleCreateSession();
-    });
+    const hook = await renderHook(() => useCreateNewSession(createSessionParams({
+      selectedPath: '/home/happier',
+      getRequestedPath: () => requestedPathRef.current,
+    })));
+    await act(async () => { await hook.getCurrent().handleCreateSession(); });
     await flushHookEffects({ runAllTimers: true });
-    await createPromise!;
+    expect(machineSpawnNewSessionSpy).toHaveBeenCalledWith(expect.objectContaining({ directory: '/home/happier/projects/subdir' }));
+    await hook.unmount();
+  });
 
-    expect(machineSpawnNewSessionSpy).toHaveBeenCalledTimes(1);
-    const arg = machineSpawnNewSessionSpy.mock.calls[0]?.[0] as any;
-    expect(arg?.directory).toBe('/home/happier/projects/subdir');
+  it('launches the prepared HQ worktree and keeps the current scope valid before selectedPath rerenders', async () => {
+    const { useCreateNewSession, machineSpawnNewSessionSpy, followUpSpawnedSessionWithServerScopeSpy, applySettingsSpy } = await setupHarness();
+    machineSpawnNewSessionSpy.mockResolvedValueOnce({ type: 'success', sessionId: 'prepared-work-session' });
+    let requestedPath = '/srv/projects/acme/product/repo';
+    const worktreePath = '/srv/projects/.worktrees/acme/product/repo/task-1';
+    const router = { push: vi.fn(), replace: vi.fn() };
+    const mcpSelection = Object.freeze({ v: 1 as const, managedServersEnabled: true, forceIncludeServerIds: ['docs'], forceExcludeServerIds: ['search'] });
+    const options = Object.freeze({ model: 'gpt-6-astra', effort: 'ultra', webSearch: 'live', network: true, mcpSelection });
+    const hqSessionOptions = Object.freeze({ preset: 'work' as const, options });
+    const hook = await renderHook(() => useCreateNewSession(createSessionParams({
+      router,
+      selectedPath: '/srv/projects/acme/product/repo',
+      getRequestedPath: () => requestedPath,
+      prepareRequestedPath: async () => { requestedPath = worktreePath; return worktreePath; },
+      hqSessionOptions,
+      permissionMode: 'yolo',
+      modelMode: 'gpt-6-astra',
+      mcpSelection,
+      promptStore: createNewSessionPromptStore('Implement the task'),
+    })));
+    await act(async () => { await hook.getCurrent().handleCreateSession(); });
+    await flushHookEffects({ runAllTimers: true });
+    expect(machineSpawnNewSessionSpy).toHaveBeenCalledWith(expect.objectContaining({
+      directory: worktreePath,
+      modelId: 'gpt-6-astra',
+      permissionMode: 'yolo',
+      mcpSelection,
+      environmentVariables: { HQ_PRESET: 'work', HQ_SESSION_OPTIONS: JSON.stringify({ v: 1, ...options }) },
+    }));
+    expect(followUpSpawnedSessionWithServerScopeSpy).toHaveBeenCalledWith(expect.objectContaining({ sessionId: 'prepared-work-session', initialMessageText: 'Implement the task' }));
+    expect(router.replace).toHaveBeenCalledWith('/session/prepared-work-session?serverId=server-a', expect.anything());
+    expect(options).not.toHaveProperty('v');
+    expect(applySettingsSpy).toHaveBeenCalledWith(expect.objectContaining({ recentMachinePaths: [{ machineId: 'm1', path: worktreePath }] }));
+    await hook.unmount();
+  });
 
+  it('inserts a prompt template without preparing an HQ worktree or spawning a session', async () => {
+    const { useCreateNewSession, machineSpawnNewSessionSpy, storageState, applySettingsSpy } = await setupHarness();
+    storageState.settings = {
+      promptInvocationsV1: {
+        v: 1,
+        entries: [{ id: 'insert-template', token: '/draft', title: 'Draft', target: { kind: 'doc', artifactId: 'template-doc' }, behavior: 'insert', allowArgs: false, availableIn: 'global' }],
+      },
+    };
+    storageState.artifacts['template-doc'] = { body: JSON.stringify({ v: 1, markdown: 'Expanded task', createdAtMs: 0, updatedAtMs: 0 }) };
+    const prepareRequestedPath = vi.fn(async () => '/srv/projects/.worktrees/task');
+    const setSessionPrompt = vi.fn();
+    const hook = await renderHook(() => useCreateNewSession(createSessionParams({
+      prepareRequestedPath,
+      setSessionPrompt,
+      promptStore: createNewSessionPromptStore('/draft'),
+    })));
+    await act(async () => { await hook.getCurrent().handleCreateSession(); });
+    expect(setSessionPrompt).toHaveBeenCalledWith('Expanded task');
+    expect(prepareRequestedPath).not.toHaveBeenCalled();
+    expect(machineSpawnNewSessionSpy).not.toHaveBeenCalled();
+    expect(applySettingsSpy).not.toHaveBeenCalled();
+    await hook.unmount();
+  });
+
+  it('preserves a prompt edited during HQ preparation without spawning or capturing it for an older first turn', async () => {
+    const { useCreateNewSession, machineSpawnNewSessionSpy, captureSessionDraftLaunchCurrentnessSpy } = await setupHarness();
+    const promptStore = createNewSessionPromptStore('Original task');
+    let finishPreparation!: (path: string) => void;
+    const preparation = new Promise<string>(resolve => { finishPreparation = resolve; });
+    const prepareRequestedPath = vi.fn(() => preparation);
+    const persistDraftForLaunch = vi.fn(async () => {});
+    const hook = await renderHook(() => useCreateNewSession(createSessionParams({
+      promptStore,
+      prepareRequestedPath,
+      persistDraftForLaunch,
+    })));
+    let launch!: Promise<void> | void;
+    await act(async () => { launch = hook.getCurrent().handleCreateSession(); });
+    expect(prepareRequestedPath).toHaveBeenCalledTimes(1);
+    promptStore.setPrompt('New task entered while HQ prepares');
+    await act(async () => { finishPreparation('/srv/projects/.worktrees/task'); await launch; });
+    expect(machineSpawnNewSessionSpy).not.toHaveBeenCalled();
+    expect(persistDraftForLaunch).not.toHaveBeenCalled();
+    expect(captureSessionDraftLaunchCurrentnessSpy).not.toHaveBeenCalled();
+    expect(promptStore.getPrompt()).toBe('New task entered while HQ prepares');
+    await hook.unmount();
+  });
+
+  it('sends Research preferences without inheriting profile environment or mutating the preset', async () => {
+    const { useCreateNewSession, machineSpawnNewSessionSpy } = await setupHarness();
+    const { createEmptyCustomProfile } = await import('@/sync/domains/profiles/profileMutations');
+    const profile = createEmptyCustomProfile();
+    profile.environmentVariables = [{ name: 'HOST_PROFILE_OPTION', value: 'host-only', isSecret: false }];
+    const options = Object.freeze({ effort: 'high', webSearch: 'disabled', network: false });
+    const hqSessionOptions = Object.freeze({ preset: 'research' as const, options });
+    const before = JSON.stringify(hqSessionOptions);
+    const hook = await renderHook(() => useCreateNewSession(createSessionParams({
+      selectedPath: '/home/agent/Desktop/WikiPedik/research',
+      hqSessionOptions,
+      useProfiles: true,
+      selectedProfileId: profile.id,
+      profileMap: new Map([[profile.id, profile]]),
+    })));
+    await act(async () => { await hook.getCurrent().handleCreateSession(); });
+    await flushHookEffects({ runAllTimers: true });
+    expect(machineSpawnNewSessionSpy).toHaveBeenCalledWith(expect.objectContaining({
+      directory: '/home/agent/Desktop/WikiPedik/research',
+      environmentVariables: { HQ_PRESET: 'research', HQ_SESSION_OPTIONS: JSON.stringify({ v: 1, ...options }) },
+    }));
+    expect(JSON.stringify(hqSessionOptions)).toBe(before);
+    expect(profile.environmentVariables).toEqual([{ name: 'HOST_PROFILE_OPTION', value: 'host-only', isSecret: false }]);
     await hook.unmount();
   });
 

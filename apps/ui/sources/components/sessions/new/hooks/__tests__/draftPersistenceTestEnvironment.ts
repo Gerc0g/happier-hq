@@ -162,6 +162,7 @@ const tryShowDaemonUnavailableAlertForRpcErrorMock = vi.hoisted(() => vi.fn((_ar
 const routerPushMock = vi.hoisted(() => vi.fn());
 const routerSetParamsMock = vi.hoisted(() => vi.fn());
 const featureFlags = vi.hoisted(() => ({
+    directSessionsEnabled: false,
     mcpServersEnabled: false,
     automationsEnabled: false,
 }));
@@ -732,9 +733,6 @@ vi.mock('@/sync/store/settingsWriters', () => ({
     useApplySettings: () => vi.fn(),
 }));
 
-vi.mock('@/utils/sessions/recentPaths', () => ({
-    getRecentPathsForMachine: () => [],
-}));
 
 vi.mock('@/hooks/auth/useCLIDetection', () => ({
     useCLIDetection: () => cliDetectionState.value,
@@ -841,6 +839,7 @@ vi.mock('@/hooks/server/useAutomationsSupport', () => ({
 vi.mock('@/hooks/server/useFeatureEnabled', () => ({
     useFeatureEnabled: (featureId: string) => {
         if (featureId === 'mcp.servers') return featureFlags.mcpServersEnabled;
+        if (featureId === 'sessions.direct') return featureFlags.directSessionsEnabled;
         return false;
     },
 }));
@@ -991,6 +990,7 @@ export async function resetDraftPersistenceState(): Promise<void> {
     accountProfileState.value = null;
     routerPushMock.mockClear();
     routerSetParamsMock.mockClear();
+    featureFlags.directSessionsEnabled = false;
     featureFlags.mcpServersEnabled = false;
     featureFlags.automationsEnabled = false;
     persistDraftNowRef.current = null;
@@ -1064,6 +1064,8 @@ export async function resetDraftPersistenceState(): Promise<void> {
         timestamp: 123,
         refresh: vi.fn(),
     };
+    for (const field of ['hqChatType', 'hqWorktreeTask', 'hqWorktreeCreation']) Reflect.deleteProperty(persistedDraft, field);
+    settingsState.recentMachinePaths = [];
     settingsState.useEnhancedSessionWizard = false;
     settingsState.useProfiles = false;
     (settingsState as any).rememberLastEngineSelectionsV1 = settingsDefaults.rememberLastEngineSelectionsV1;

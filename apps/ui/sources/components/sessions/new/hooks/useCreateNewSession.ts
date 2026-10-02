@@ -224,6 +224,8 @@ export function useCreateNewSession(params: Readonly<{
     selectedMachineId: string | null;
     selectedPath: string;
     getRequestedPath?: () => string;
+    prepareRequestedPath?: () => Promise<string>;
+    hqSessionOptions?: Readonly<{ preset: 'work' | 'research'; options: Readonly<Record<string, unknown>> }> | null;
     selectedMachine: any;
 
     setIsCreating: (v: boolean) => void;
@@ -345,10 +347,10 @@ export function useCreateNewSession(params: Readonly<{
         const requestedPath = typeof current.getRequestedPath === 'function'
             ? current.getRequestedPath()
             : current.selectedPath;
-        const effectiveSelectedPath = (typeof requestedPath === 'string'
+        let effectiveSelectedPath = (typeof requestedPath === 'string'
             ? requestedPath
             : current.selectedPath).trim();
-        const trimmedEffectiveSelectedPath = effectiveSelectedPath;
+        let trimmedEffectiveSelectedPath = effectiveSelectedPath;
         let rollbackActualPath: string | null = null;
         let rollbackServerId: string | null = current.targetServerId ?? null;
         let confirmedCreatedSessionId: string | null = null;
@@ -396,45 +398,6 @@ export function useCreateNewSession(params: Readonly<{
                 ? targetResolution.targetServerId
                 : snapshot.serverId;
             rollbackServerId = resolvedTargetServerId;
-            const launchScopeKey = buildNewSessionLaunchScopeKey({
-                machineId: current.selectedMachineId,
-                serverId: resolvedTargetServerId,
-                selectedPath: trimmedEffectiveSelectedPath,
-                useProfiles: current.useProfiles,
-                selectedProfileId: current.useProfiles ? current.selectedProfileId : null,
-            });
-            const resolveCurrentLaunchScopeKey = (): string => {
-                const latest = latestParamsRef.current;
-                const latestRequestedPath = typeof latest.getRequestedPath === 'function'
-                    ? latest.getRequestedPath()
-                    : latest.selectedPath;
-                const latestEffectiveSelectedPath = (typeof latestRequestedPath === 'string'
-                    ? latestRequestedPath
-                    : latest.selectedPath).trim();
-                const latestTargetServerId = typeof latest.targetServerId === 'string' ? latest.targetServerId.trim() : '';
-                const latestSnapshot = getActiveServerSnapshot();
-                const latestAllowedTargetServerIds = Array.isArray(latest.allowedTargetServerIds)
-                    ? latest.allowedTargetServerIds
-                    : [latestSnapshot.serverId];
-                const latestTargetResolution = resolveNewSessionServerTarget({
-                    requestedServerId: latestTargetServerId,
-                    activeServerId: latestSnapshot.serverId,
-                    allowedServerIds: latestAllowedTargetServerIds,
-                });
-                const latestResolvedTargetServerId = typeof latestTargetResolution.targetServerId === 'string'
-                    && latestTargetResolution.targetServerId.trim().length > 0
-                    ? latestTargetResolution.targetServerId
-                    : latestSnapshot.serverId;
-                return buildNewSessionLaunchScopeKey({
-                    machineId: latest.selectedMachineId,
-                    serverId: latestResolvedTargetServerId,
-                    selectedPath: latestEffectiveSelectedPath,
-                    useProfiles: latest.useProfiles,
-                    selectedProfileId: latest.useProfiles ? latest.selectedProfileId : null,
-                });
-            };
-            const isLaunchScopeStillActive = (): boolean => resolveCurrentLaunchScopeKey() === launchScopeKey;
-
             const sessionPromptText = typeof opts?.inputTextOverride === 'string'
                 ? opts.inputTextOverride
                 : current.promptStore.getPrompt();
@@ -465,23 +428,7 @@ export function useCreateNewSession(params: Readonly<{
                 return;
             }
 
-            const updatedPaths = [
-                { machineId: current.selectedMachineId, path: effectiveSelectedPath },
-                ...current.recentMachinePaths.filter((rp) => (
-                    rp.machineId !== current.selectedMachineId || rp.path !== effectiveSelectedPath
-                )),
-            ].slice(0, 10);
             const profilesActive = current.useProfiles;
-
-            const settingsUpdate: MutableSettingsDelta = {
-                recentMachinePaths: updatedPaths,
-                lastUsedAgent: current.agentType,
-                lastUsedBackendTarget: current.backendTarget,
-            };
-            if (profilesActive) {
-                settingsUpdate.lastUsedProfile = current.selectedProfileId;
-            }
-            applySettings(settingsUpdate);
 
             const backendTarget: BackendTargetRefV1 = current.backendTarget ?? { kind: 'builtInAgent', agentId: current.agentType };
             let environmentVariables = undefined;
@@ -564,6 +511,12 @@ export function useCreateNewSession(params: Readonly<{
                     targetServerId: resolvedTargetServerId,
                 },
             });
+            if (current.hqSessionOptions) {
+                environmentVariables = {
+                    HQ_PRESET: current.hqSessionOptions.preset,
+                    HQ_SESSION_OPTIONS: JSON.stringify({ v: 1, ...current.hqSessionOptions.options }),
+                };
+            }
             const connectedServices = readNewSessionConnectedServicesOption(current.agentNewSessionOptions);
 
             const terminal = resolveTerminalSpawnOptions({
@@ -593,6 +546,73 @@ export function useCreateNewSession(params: Readonly<{
                 current.setIsCreating(false);
                 return;
             }
+
+            // Validate composer-only actions and launch prerequisites before materializing an HQ worktree.
+            if (current.prepareRequestedPath) {
+                effectiveSelectedPath = (await current.prepareRequestedPath()).trim();
+                trimmedEffectiveSelectedPath = effectiveSelectedPath;
+                // HQ setup can outlive composer edits. Keep the prepared worktree, but do not
+                // launch an older first turn against a draft persisted with the newer text.
+                if (typeof opts?.inputTextOverride !== 'string' && current.promptStore.getPrompt() !== sessionPromptText) {
+                    throw new Error(t('hq.routing.contextChanged'));
+                }
+            }
+
+            const launchScopeKey = buildNewSessionLaunchScopeKey({
+                machineId: current.selectedMachineId,
+                serverId: resolvedTargetServerId,
+                selectedPath: trimmedEffectiveSelectedPath,
+                useProfiles: current.useProfiles,
+                selectedProfileId: current.useProfiles ? current.selectedProfileId : null,
+            });
+            const resolveCurrentLaunchScopeKey = (): string => {
+                const latest = latestParamsRef.current;
+                const latestRequestedPath = typeof latest.getRequestedPath === 'function'
+                    ? latest.getRequestedPath()
+                    : latest.selectedPath;
+                const latestEffectiveSelectedPath = (typeof latestRequestedPath === 'string'
+                    ? latestRequestedPath
+                    : latest.selectedPath).trim();
+                const latestTargetServerId = typeof latest.targetServerId === 'string' ? latest.targetServerId.trim() : '';
+                const latestSnapshot = getActiveServerSnapshot();
+                const latestAllowedTargetServerIds = Array.isArray(latest.allowedTargetServerIds)
+                    ? latest.allowedTargetServerIds
+                    : [latestSnapshot.serverId];
+                const latestTargetResolution = resolveNewSessionServerTarget({
+                    requestedServerId: latestTargetServerId,
+                    activeServerId: latestSnapshot.serverId,
+                    allowedServerIds: latestAllowedTargetServerIds,
+                });
+                const latestResolvedTargetServerId = typeof latestTargetResolution.targetServerId === 'string'
+                    && latestTargetResolution.targetServerId.trim().length > 0
+                    ? latestTargetResolution.targetServerId
+                    : latestSnapshot.serverId;
+                return buildNewSessionLaunchScopeKey({
+                    machineId: latest.selectedMachineId,
+                    serverId: latestResolvedTargetServerId,
+                    selectedPath: latestEffectiveSelectedPath,
+                    useProfiles: latest.useProfiles,
+                    selectedProfileId: latest.useProfiles ? latest.selectedProfileId : null,
+                });
+            };
+            const isLaunchScopeStillActive = (): boolean => resolveCurrentLaunchScopeKey() === launchScopeKey;
+
+            const updatedPaths = [
+                { machineId: current.selectedMachineId, path: effectiveSelectedPath },
+                ...current.recentMachinePaths.filter((rp) => (
+                    rp.machineId !== current.selectedMachineId || rp.path !== effectiveSelectedPath
+                )),
+            ].slice(0, 10);
+
+            const settingsUpdate: MutableSettingsDelta = {
+                recentMachinePaths: updatedPaths,
+                lastUsedAgent: current.agentType,
+                lastUsedBackendTarget: current.backendTarget,
+            };
+            if (profilesActive) {
+                settingsUpdate.lastUsedProfile = current.selectedProfileId;
+            }
+            applySettings(settingsUpdate);
 
             // D2: when "start fresh under the new account" was chosen, drop the resume reference so the
             // relaunch creates a clean session bound to the now-active connected-service account.

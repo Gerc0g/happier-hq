@@ -58,6 +58,8 @@ const IGNORED_UNTRANSLATED_KEYS = new Set([
 ]);
 const IGNORED_UNTRANSLATED_KEYS_BY_LOCALE: Readonly<Record<string, ReadonlySet<string>>> = {
     es: new Set([
+        // "General" is also the native label in this locale.
+        'hq.routing.ordinary',
         'automations.form.schedule.manualTitle',
         'settingsSession.sessionList.headerIdentityDisplayAvatarTitle',
     ]),
@@ -470,6 +472,8 @@ const IGNORED_UNTRANSLATED_KEYS_BY_LOCALE: Readonly<Record<string, ReadonlySet<s
     ]),
     // These locales use the same spelling for this label.
     ca: new Set([
+        // "General" is also the native label in this locale.
+        'hq.routing.ordinary',
         'agentInput.suggestionGroups.sessions',
         'automations.form.schedule.manualTitle',
         // "Errors" is the Catalan plural of "error", not an untranslated fallback.

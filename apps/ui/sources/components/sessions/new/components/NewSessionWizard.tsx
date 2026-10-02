@@ -470,7 +470,7 @@ export const NewSessionWizard = React.memo(function NewSessionWizard(props: NewS
     const modelOptionsProbePhase = modelOptionsProbe?.phase ?? 'idle';
     const modelOptionsProbeIsBusy = modelOptionsProbePhase === 'loading' || modelOptionsProbePhase === 'refreshing';
     const hasModelOptionsProbeAffordance = modelOptionsProbeIsBusy || typeof modelOptionsProbe?.onRefresh === 'function';
-    const shouldRenderModelSection = modelOptions.length > 0 || hasModelOptionsProbeAffordance;
+    const shouldRenderModelSection = (modelOptions.length > 0 || hasModelOptionsProbeAffordance);
     const pairAgentAndModelSections = useSelectionColumns && shouldRenderModelSection;
     const handleSelectMachine = React.useCallback((machine: Machine) => {
         setSelectedMachineId(machine.id);

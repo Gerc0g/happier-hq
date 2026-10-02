@@ -119,12 +119,23 @@ describe('resolveAgentInputControlLines', () => {
             'files',
             'reviewComments',
             'storage',
+            'hqAgent',
             'windowsRemoteSessionMode',
             'providerOption',
             'shortcuts',
+            'hqCompany',
+            'hqProduct',
+            'hqRepo',
+            'hqWorktree',
             'machine',
             'path',
             'resume',
         ]);
     });
+});
+
+it('places the HQ agent beside storage and its work context in the secondary line', () => {
+    const lines = resolveAgentInputControlLines({ layout: 'wrap', controlIds: ['hqWorktree', 'hqRepo', 'hqProduct', 'hqCompany', 'hqAgent', 'storage', 'engine', 'machine', 'path'] });
+    expect(lines.primary).toEqual(['engine', 'storage', 'hqAgent']);
+    expect(lines.secondary).toEqual(['hqCompany', 'hqProduct', 'hqRepo', 'hqWorktree', 'machine', 'path']);
 });

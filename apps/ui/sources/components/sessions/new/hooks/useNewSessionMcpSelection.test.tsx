@@ -4,6 +4,8 @@ import { act } from 'react-test-renderer';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { DaemonMcpServersPreviewResponse } from '@happier-dev/protocol';
+import type { HqAgentPreset } from '@/sync/domains/hq/hqAgentSettings';
+import type { UseNewSessionMcpSelectionResult } from './useNewSessionMcpSelection';
 import { SessionMcpSelectionV1Schema } from '@happier-dev/protocol';
 import { RPC_ERROR_CODES } from '@happier-dev/protocol/rpc';
 import { RpcError } from '@happier-dev/protocol/rpcErrors';
@@ -297,6 +299,56 @@ describe('useNewSessionMcpSelection', () => {
         expect(updatedContentNode.props.selection).toEqual(expect.objectContaining({
             forceExcludeServerIds: ['server-playwright'],
         }));
+    });
+
+    it('uses HQ preset MCP names and changes only the chat selection without querying the ordinary machine catalog', async () => {
+        const { useNewSessionMcpSelection } = await import('./useNewSessionMcpSelection');
+        const preset: HqAgentPreset = {
+            model: 'gpt-6-astra', effort: 'ultra', webSearch: 'live', network: true,
+            instructions: '', skills: [], hooks: { sessionContext: true, inboxCapture: true },
+            mcp: [
+                { name: 'docs', command: 'docs', args: [], enabled: true },
+                { name: 'lookup', command: 'lookup', args: [], enabled: false },
+            ],
+        };
+        for (const server of preset.mcp) Object.freeze(server);
+        Object.freeze(preset.mcp);
+        Object.freeze(preset);
+        const originalPreset = JSON.stringify(preset);
+        let current: UseNewSessionMcpSelectionResult | undefined;
+        let currentSelection = SessionMcpSelectionV1Schema.parse({});
+        function Probe() {
+            const [selection, setSelection] = React.useState(() => SessionMcpSelectionV1Schema.parse({}));
+            currentSelection = selection;
+            current = useNewSessionMcpSelection({
+                hqPreset: preset,
+                selectedMachineId: 'machine-1', selectedPath: '/workspace',
+                agentType: 'codex', targetServerId: 'server-a',
+                mcpSelection: selection, setMcpSelection: setSelection,
+                onOpenSettings: vi.fn(),
+            });
+            return null;
+        }
+        await renderScreen(React.createElement(Probe));
+        await flushHookEffects();
+        type RowProps = { testID: string; title: string; selected: boolean; onPress: () => void };
+        const rows = () => {
+            const renderContent = current?.mcpChip?.collapsedContentPopover?.renderContent;
+            if (typeof renderContent !== 'function') throw new Error('HQ MCP content renderer is unavailable');
+            const content = renderContent({ requestClose: () => {}, maxHeight: 420 });
+            if (!React.isValidElement<{ children: React.ReactNode }>(content)) throw new Error('HQ MCP content was not rendered');
+            return React.Children.toArray(content.props.children)
+                .filter((node): node is React.ReactElement<RowProps> => React.isValidElement<RowProps>(node));
+        };
+        expect(rows().map(row => [row.props.title, row.props.selected])).toEqual([['docs', true], ['lookup', false]]);
+        await act(async () => { current?.mcpChip?.onIntent?.(); });
+        await act(async () => { rows()[0].props.onPress(); });
+        await act(async () => { rows()[1].props.onPress(); });
+        await flushHookEffects();
+        expect(currentSelection).toEqual({ v: 1, managedServersEnabled: true, forceIncludeServerIds: ['lookup'], forceExcludeServerIds: ['docs'] });
+        expect(rows().map(row => [row.props.title, row.props.selected])).toEqual([['docs', false], ['lookup', true]]);
+        expect(JSON.stringify(preset)).toBe(originalPreset);
+        expect(previewSpy).not.toHaveBeenCalled();
     });
 
     it('treats RPC method-not-available preview errors as unsupported instead of surfacing them as a blocking error', async () => {

@@ -70,6 +70,9 @@ export function readNewSessionDraftFromSnapshot(snapshot: SessionDraftSnapshot |
     const launchUserAttemptId = snapshot.localSupplement.launchUserAttemptId;
     const draft = {
         ...persisted,
+        hqChatType: snapshot.localSupplement.newSessionLocalState?.hqChatType,
+        hqWorktreeTask: snapshot.localSupplement.newSessionLocalState?.hqWorktreeTask,
+        hqWorktreeCreation: snapshot.localSupplement.newSessionLocalState?.hqWorktreeCreation,
         entryIntent: snapshot.localSupplement.newSessionLocalState?.entryIntent ?? null,
         ...(launchUserAttemptId ? { launchUserAttemptId } : {}),
     };

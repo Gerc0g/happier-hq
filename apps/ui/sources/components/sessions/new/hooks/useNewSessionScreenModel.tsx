@@ -1,3 +1,7 @@
+import { isHqWorkspaceEnabled } from '@/sync/domains/hq/hqRuntime';
+import { isMachineOnline } from '@/utils/sessions/machineUtils';
+import { useHqChatRouting } from './useHqChatRouting';
+import { createHqChatRoutingChips } from '../components/HqChatRoutingPicker';
 import React from 'react';
 import { View, useWindowDimensions, InteractionManager } from 'react-native';
 import { useLaunchSelectionMachines, useSessionRecentPathEntries, storage, useSetting, useSettingMutable, useSettings } from '@/sync/domains/state/storage';
@@ -28,7 +32,9 @@ import {
     resolveBuiltInAgentIdForBackendTarget,
 } from '@/agents/backendCatalog/getResolvedBackendCatalogEntries';
 
-import type { NewSessionDraft } from '@/sync/domains/state/persistence';
+import { loadHqChatType, saveHqChatType, type NewSessionDraft } from '@/sync/domains/state/persistence';
+import type { HqWorktreeCreationAttempt } from './useHqChatRouting';
+import { resolveHqChatTarget, type HqChatType } from '@/sync/domains/hq/hqChatRouting';
 import { NewSessionEngineOptionDetail } from '@/components/sessions/new/components/NewSessionEngineOptionDetail';
 import { consumeProfileIdParam } from '@/profileRouteParams';
 import { normalizeOptionalParam } from '@/profileRouteParams';
@@ -133,6 +139,7 @@ import { useActionOperation, useAllActionOperations } from '@/sync/domains/actio
 import { resolvePersistedNewSessionOperationIdentity } from '@/sync/domains/actionOperations/actionOperationReentry';
 import {
     flushSessionDraft,
+    getSessionDraftSnapshot,
     writeNewSessionDraft,
     writeSessionDraftLocalSupplement,
 } from '@/sync/ops/sessionDrafts/sessionDraftRepository';
@@ -280,16 +287,19 @@ export function useNewSessionScreenModel(params?: Readonly<{ draftId?: string }>
     // A/B Test Flag - determines which wizard UI to show
     // Control A (false): Simpler AgentInput-driven layout
     // Variant B (true): Enhanced profile-first wizard with sections
-    const useEnhancedSessionWizard = useSetting('useEnhancedSessionWizard');
+    const enhancedSessionWizardSetting = useSetting('useEnhancedSessionWizard');
+    const hqRoutingEnabled = isHqWorkspaceEnabled();
 
     useNewSessionHappyRouteFlag(pathname);
 
     const sessionPromptInputMaxHeight = undefined;
-    const useProfiles = useSetting('useProfiles');
+    const profilesEnabled = useSetting('useProfiles');
+    const useProfiles = profilesEnabled;
     const [secrets, setSecrets] = useSettingMutable('secrets');
     const [secretBindingsByProfileId, setSecretBindingsByProfileId] = useSettingMutable('secretBindingsByProfileId');
     const sessionDefaultPermissionModeByTargetKey = useSetting('sessionDefaultPermissionModeByTargetKey');
-    const settings = useSettings() ?? settingsDefaults;
+    const savedSettings = useSettings() ?? settingsDefaults;
+    const settings = savedSettings;
     const accountProfile = useAccountProfile();
     const activeServerSource = useNewSessionActiveServerSource();
     const draftScope = useActiveServerAccountScope();
@@ -583,6 +593,27 @@ export function useNewSessionScreenModel(params?: Readonly<{ draftId?: string }>
             return { kind: 'builtInAgent', agentId: nextAgentId };
         });
     }, [setBackendTarget]);
+    const {
+        transcriptStorage,
+        setTranscriptStorage,
+        supportsDirectTranscriptStorage,
+        hasUserSelectedTranscriptStorageRef,
+    } = useNewSessionTranscriptStorageState({
+        hydratedTempAuthoringDraft,
+        hydratedPersistedAuthoringDraft,
+        profileMap,
+        selectedProfileId,
+        newSessionDefaultPersistenceModeV1,
+        newSessionDefaultPersistenceModeByTargetKeyV1,
+        resolvedBackendTargets: resolvedBackendEntries.map((entry) => entry.target),
+        agentType,
+        backendTarget,
+        settings,
+        directSessionsFeatureEnabled,
+    });
+    const hqRoutingActive = hqRoutingEnabled && transcriptStorage === 'persisted';
+    const useEnhancedSessionWizard = !hqRoutingActive && enhancedSessionWizardSetting;
+    const sessionSettings = React.useMemo(() => hqRoutingActive ? { ...settings, codexBackendMode: 'appServer' as const } : settings, [hqRoutingActive, settings]);
     const selectedBackendTargetKey = React.useMemo(() => buildBackendTargetKey(backendTarget), [backendTarget]);
     const selectedBackendEntry = React.useMemo(() => {
         return resolvedBackendEntries.find((entry) => entry.targetKey === selectedBackendTargetKey) ?? null;
@@ -740,6 +771,7 @@ export function useNewSessionScreenModel(params?: Readonly<{ draftId?: string }>
         return machines.find(m => m.id === selectedMachineId) ?? null;
     }, [selectedMachineId, machines]);
     const selectedMachineHomeDir = selectedMachine?.metadata?.homeDir ?? null;
+
     // Routed through the registry like every other composer host: the eligible-kind
     // subset is the only thing that decides which triggers resolve here (INV-1),
     // and a hand-rolled `startsWith('/')` would be a second decision-maker.
@@ -859,7 +891,7 @@ export function useNewSessionScreenModel(params?: Readonly<{ draftId?: string }>
         selectedMachineId,
         capabilityServerId,
         cwd: selectedPath,
-        profileId: useProfiles ? selectedProfileId : null,
+        profileId: useProfiles && !hqRoutingActive ? selectedProfileId : null,
         probeContext: resolveNewSessionCapabilityProbeContext({ backendTarget, settings }),
         connectedServices: connectedServicesBindingsPayload,
     });
@@ -1018,16 +1050,7 @@ export function useNewSessionScreenModel(params?: Readonly<{ draftId?: string }>
         // `router.push` expects the public route (group segments like `/(app)` are not valid here on web).
         router.push('/settings/mcp' as any);
     }, [router]);
-    const { mcpChip } = useNewSessionMcpSelection({
-        selectedMachineId,
-        selectedPath,
-        selectedMachineName: selectedMachine?.metadata?.displayName || selectedMachine?.metadata?.host || null,
-        agentType,
-        targetServerId,
-        mcpSelection,
-        setMcpSelection,
-        onOpenSettings: handleOpenMcpSettings,
-    });
+
 
     const {
         selectedSecretIdByProfileIdByEnvVarName,
@@ -1057,7 +1080,7 @@ export function useNewSessionScreenModel(params?: Readonly<{ draftId?: string }>
         setSecrets,
         selectedMachineId,
         machineEnvPresence,
-        useProfiles,
+        useProfiles: useProfiles && !hqRoutingActive,
         setSelectedProfileId,
         router,
         navigation: navigation as any,
@@ -1087,24 +1110,6 @@ export function useNewSessionScreenModel(params?: Readonly<{ draftId?: string }>
     }, []);
 
     const {
-        transcriptStorage,
-        setTranscriptStorage,
-        supportsDirectTranscriptStorage,
-        hasUserSelectedTranscriptStorageRef,
-    } = useNewSessionTranscriptStorageState({
-        hydratedTempAuthoringDraft,
-        hydratedPersistedAuthoringDraft,
-        profileMap,
-        selectedProfileId,
-        newSessionDefaultPersistenceModeV1,
-        newSessionDefaultPersistenceModeByTargetKeyV1,
-        resolvedBackendTargets: resolvedBackendEntries.map((entry) => entry.target),
-        agentType,
-        backendTarget,
-        settings,
-        directSessionsFeatureEnabled,
-    });
-    const {
         permissionMode,
         hasUserSelectedPermissionModeRef,
         permissionModeRef,
@@ -1120,6 +1125,137 @@ export function useNewSessionScreenModel(params?: Readonly<{ draftId?: string }>
         profileMap,
         enabledAgentIds,
         sessionDefaultPermissionModeByTargetKey,
+    });
+
+    const [hqChatType, setHqChatType] = React.useState<HqChatType>(() => persistedDraft?.hqChatType ?? loadHqChatType());
+    const [hqWorktreeTask, setHqWorktreeTask] = React.useState(() => persistedDraft?.hqWorktreeTask ?? '');
+    const [hqWorktreeCreation, setHqWorktreeCreation] = React.useState<HqWorktreeCreationAttempt | null>(() => persistedDraft?.hqWorktreeCreation ?? null);
+    const hqActiveDraftIdentity = JSON.stringify([draftScope?.serverId, draftScope?.accountId, draftId]);
+    const latestHqDraftIdentityRef = React.useRef(hqActiveDraftIdentity);
+    latestHqDraftIdentityRef.current = hqActiveDraftIdentity;
+    const onHqCreationAttemptChange = React.useCallback(async (attempt: HqWorktreeCreationAttempt | null) => {
+        if (latestHqDraftIdentityRef.current === hqActiveDraftIdentity) setHqWorktreeCreation(attempt);
+        if (!draftScope) throw new Error(t('hq.routing.unavailable'));
+        writeSessionDraftLocalSupplement({ scope: draftScope, address: draftAddress, patch: {
+            newSessionLocalState: { selectedSecretId: null, ...getSessionDraftSnapshot(draftScope, draftAddress)?.localSupplement.newSessionLocalState, hqWorktreeCreation: attempt },
+        } });
+        await flushSessionDraft({ scope: draftScope, address: draftAddress });
+    }, [draftScope, draftAddress, hqActiveDraftIdentity]);
+    const persistHqRoute = React.useCallback((type: HqChatType, task: string) => {
+        if (!draftScope) return;
+        writeSessionDraftLocalSupplement({ scope: draftScope, address: draftAddress, patch: {
+            newSessionLocalState: { selectedSecretId: null, ...getSessionDraftSnapshot(draftScope, draftAddress)?.localSupplement.newSessionLocalState, hqChatType: type, hqWorktreeTask: task },
+        } });
+    }, [draftScope, draftAddress]);
+    const selectHqPath = React.useCallback((path: string) => {
+        if (latestHqDraftIdentityRef.current !== hqActiveDraftIdentity) return;
+        setDraftSelectedPath(path);
+        if (path === selectedPath) return;
+        setSelectedPath(path);
+        setCheckoutCreationDraft(null);
+        setResumeSessionId('');
+        if (draftScope) writeNewSessionDraft({ scope: draftScope, draftId, patch: { authoring: { directory: path } }, materializationIntent: 'userEdit' });
+    }, [selectedPath, setSelectedPath, setDraftSelectedPath, setCheckoutCreationDraft, draftScope, draftId, hqActiveDraftIdentity]);
+    const hqRouting = useHqChatRouting({
+        draftId,
+        enabled: hqRoutingActive,
+        machineId: selectedMachineId ?? null,
+        serverId: targetServerId ?? draftScope?.serverId ?? null,
+        accountId: draftScope?.accountId ?? null,
+        online: Boolean(selectedMachine && isMachineOnline(selectedMachine)),
+        path: selectedPath,
+        type: hqChatType,
+        taskName: hqWorktreeTask,
+        creationAttempt: hqWorktreeCreation,
+        onCreationAttemptChange: onHqCreationAttemptChange,
+        onSelectPath: selectHqPath,
+    });
+    const hqTypeChosenRef = React.useRef(Boolean(persistedDraft?.hqChatType));
+    const hqDraftIdentity = JSON.stringify([draftScope?.serverId, draftScope?.accountId, draftId]);
+    const previousHqDraftIdentityRef = React.useRef(hqDraftIdentity);
+    const hqEntryContextRef = React.useRef({ identity: hqDraftIdentity, path: effectivePathParam ?? persistedDraft?.selectedPath ?? null, restoredType: persistedDraft?.hqChatType ?? null });
+    if (hqEntryContextRef.current.identity !== hqDraftIdentity) {
+        hqEntryContextRef.current = { identity: hqDraftIdentity, path: effectivePathParam ?? persistedDraft?.selectedPath ?? null, restoredType: persistedDraft?.hqChatType ?? null };
+    }
+    const hqEntryContextPath = hqEntryContextRef.current.path;
+    React.useEffect(() => {
+        if (previousHqDraftIdentityRef.current === hqDraftIdentity) return;
+        previousHqDraftIdentityRef.current = hqDraftIdentity;
+        setHqChatType(persistedDraft?.hqChatType ?? loadHqChatType());
+        setHqWorktreeTask(persistedDraft?.hqWorktreeTask ?? '');
+        setHqWorktreeCreation(persistedDraft?.hqWorktreeCreation ?? null);
+        hqTypeChosenRef.current = Boolean(persistedDraft?.hqChatType);
+        appliedHqPresetRef.current = null;
+    }, [hqDraftIdentity, persistedDraft]);
+    React.useEffect(() => {
+        if (!hqRoutingActive || !hqRouting.catalog || hqTypeChosenRef.current) return;
+        hqTypeChosenRef.current = true;
+        // Entry context is captured before ordinary autosave can materialize a recent/default directory.
+        const entryTarget = hqEntryContextPath ? resolveHqChatTarget(hqRouting.catalog, hqEntryContextPath) : null;
+        if (entryTarget) setHqChatType(entryTarget.type);
+        else if (hqChatType === 'research' && hqRouting.catalog.research) {
+            setDraftSelectedPath(hqRouting.catalog.research.path);
+            setSelectedPath(hqRouting.catalog.research.path);
+            setCheckoutCreationDraft(null);
+            setResumeSessionId('');
+        }
+    }, [hqRoutingActive, hqRouting.catalog, hqChatType, hqEntryContextPath, setDraftSelectedPath, setSelectedPath, setCheckoutCreationDraft]);
+    const selectHqType = React.useCallback((type: HqChatType) => {
+        hqTypeChosenRef.current = true;
+        setHqChatType(type);
+        saveHqChatType(type);
+        persistHqRoute(type, hqWorktreeTask);
+        selectHqPath(type === 'research' ? hqRouting.catalog?.research?.path ?? '' : '');
+    }, [hqWorktreeTask, persistHqRoute, selectHqPath, hqRouting.catalog]);
+    const requestedSessionPath = getRequestedPath;
+    const prepareHqSessionPath = React.useCallback(async () => {
+        const path = await hqRouting.prepareLaunch();
+        if (latestHqDraftIdentityRef.current !== hqActiveDraftIdentity || getRequestedPath().trim() !== path.trim()) {
+            throw new Error(t('hq.routing.contextChanged'));
+        }
+        return path;
+    }, [hqRouting.prepareLaunch, hqActiveDraftIdentity, getRequestedPath]);
+    const hqSessionOptions = React.useMemo(() => hqRoutingActive && hqRouting.preset ? {
+        preset: hqRouting.type,
+        options: {
+            effort: sessionConfigOptionOverrides?.overrides?.reasoning_effort?.value ?? hqRouting.preset.effort,
+            webSearch: hqRouting.preset.webSearch,
+            network: hqRouting.preset.network,
+            ...(hqRouting.preset.serviceTier ? { serviceTier: hqRouting.preset.serviceTier } : {}),
+        },
+    } : null, [hqRoutingActive, hqRouting.preset, hqRouting.type, sessionConfigOptionOverrides]);
+    const hqRoutingPickerProps = {
+        catalog: hqRouting.catalog, snapshot: hqRouting.snapshot, path: selectedPath,
+        type: hqRouting.type, taskName: hqWorktreeTask,
+        loading: hqRouting.loading, error: hqRouting.error,
+        onSelectPath: selectHqPath, onReload: hqRouting.reload,
+        onSelectType: selectHqType,
+        onChangeTaskName: (task: string) => { setHqWorktreeTask(task); persistHqRoute(hqRouting.type, task); },
+    };
+    const appliedHqPresetRef = React.useRef<string | null>(null);
+    React.useEffect(() => {
+        if (!hqRoutingActive || !hqRouting.preset) return;
+        const key = JSON.stringify([selectedMachineId, targetServerId, hqRouting.type]);
+        if (appliedHqPresetRef.current === key) return;
+        const restoringPreset = appliedHqPresetRef.current === null && hqEntryContextRef.current.restoredType === hqRouting.type;
+        appliedHqPresetRef.current = key;
+        if (!restoringPreset) {
+            setModelMode(hqRouting.preset.model || 'default');
+            setMcpSelection({ v: 1, managedServersEnabled: true, forceIncludeServerIds: [], forceExcludeServerIds: [] });
+            setSessionConfigOptionOverride('reasoning_effort', hqRouting.preset.effort);
+        }
+    }, [hqRoutingActive, hqRouting.preset, hqRouting.type, selectedMachineId, targetServerId, persistedDraft?.hqChatType, setModelMode, setMcpSelection, setSessionConfigOptionOverride]);
+
+    const { mcpChip } = useNewSessionMcpSelection({
+        hqPreset: hqRoutingActive ? hqRouting.preset : undefined,
+        selectedMachineId,
+        selectedPath,
+        selectedMachineName: selectedMachine?.metadata?.displayName || selectedMachine?.metadata?.host || null,
+        agentType,
+        targetServerId,
+        mcpSelection,
+        setMcpSelection,
+        onOpenSettings: handleOpenMcpSettings,
     });
 
     // NOTE: Permission mode reset on agentType change is handled by the validation useEffect below (lines ~670-681)
@@ -1450,7 +1586,7 @@ export function useNewSessionScreenModel(params?: Readonly<{ draftId?: string }>
 
     // Keep agentType compatible with the currently selected profile.
     React.useEffect(() => {
-        if (!useProfiles || selectedProfileId === null) {
+        if (hqRoutingActive || !useProfiles || selectedProfileId === null) {
             return;
         }
 
@@ -1463,7 +1599,7 @@ export function useNewSessionScreenModel(params?: Readonly<{ draftId?: string }>
         if (nextEntry) {
             setBackendTarget(nextEntry.target);
         }
-    }, [profileMap, resolvePreferredCompatibleProfileBackendEntry, selectedProfileId, setBackendTarget, useProfiles]);
+    }, [hqRoutingActive, profileMap, resolvePreferredCompatibleProfileBackendEntry, selectedProfileId, setBackendTarget, useProfiles]);
 
     const prevAgentTypeRef = React.useRef(agentType);
 
@@ -1496,6 +1632,7 @@ export function useNewSessionScreenModel(params?: Readonly<{ draftId?: string }>
 
     // Reset model mode when agent type changes to appropriate default
     React.useEffect(() => {
+        if (hqRoutingActive) return;
         const core = getAgentCore(agentType);
         const next = coerceNewSessionModelMode({
             modelMode: String(modelMode),
@@ -1517,7 +1654,7 @@ export function useNewSessionScreenModel(params?: Readonly<{ draftId?: string }>
         if (next !== modelMode) {
             setModelMode(next as ModelMode);
         }
-    }, [agentType, modelMode, preflightModels, preflightModelsTargetKey, selectedBackendEntry?.targetKey, selectedBackendTargetKey]);
+    }, [hqRoutingActive, agentType, modelMode, preflightModels, preflightModelsTargetKey, selectedBackendEntry?.targetKey, selectedBackendTargetKey]);
 
     const clearBackendTargetRouteParamsAfterExplicitSelection = React.useCallback(() => {
         if (
@@ -1548,7 +1685,7 @@ export function useNewSessionScreenModel(params?: Readonly<{ draftId?: string }>
         handleAgentPickerSelect,
         handleAgentClick,
     } = useNewSessionAgentPickerControls({
-        useProfiles,
+        useProfiles: useProfiles && !hqRoutingActive,
         selectedProfileId,
         profileMap,
         resolvedBackendEntries,
@@ -1650,6 +1787,13 @@ export function useNewSessionScreenModel(params?: Readonly<{ draftId?: string }>
         targetServerId,
     ]);
 
+    React.useEffect(() => {
+        if (!hqRoutingActive) return;
+        if (backendTarget.kind !== 'builtInAgent' || backendTarget.agentId !== 'codex') setAgentType('codex');
+    }, [hqRoutingActive, backendTarget, setAgentType]);
+
+    const hqRouteState = React.useMemo(() => hqRoutingEnabled ? { hqChatType: hqRouting.type, hqWorktreeTask, hqWorktreeCreation } : undefined, [hqRoutingEnabled, hqRouting.type, hqWorktreeTask, hqWorktreeCreation]);
+
     const {
         authoringContext: newSessionAuthoringContext,
         currentAuthoringDraft,
@@ -1674,7 +1818,7 @@ export function useNewSessionScreenModel(params?: Readonly<{ draftId?: string }>
         agentType,
         backendTarget,
         transcriptStorage,
-        useProfiles,
+        useProfiles: useProfiles && !hqRoutingActive,
         selectedProfileId,
         resumeSessionId,
         permissionMode,
@@ -1698,12 +1842,14 @@ export function useNewSessionScreenModel(params?: Readonly<{ draftId?: string }>
         draftScope,
         draftId,
         launchUserAttemptId,
+        hqRouteState,
     });
 
     // V1 requires the source Session and the target to share a server. Block
     // submission rather than silently dropping the continuation recipe; the user
     // can switch back or remove the chip.
-    const canCreate = canCreateFromAuthoring && !sourceContextState.serverMismatch;
+    const hqCanCreate = !hqRoutingActive || (hqRouting.ready && backendTarget.kind === 'builtInAgent' && agentType === 'codex' && transcriptStorage === 'persisted' && !checkoutCreationDraft);
+    const canCreate = canCreateFromAuthoring && !sourceContextState.serverMismatch && hqCanCreate;
 
     const persistDraftForLaunch = React.useCallback(async () => {
         if (!draftScope) return;
@@ -1711,7 +1857,7 @@ export function useNewSessionScreenModel(params?: Readonly<{ draftId?: string }>
             scope: draftScope,
             draftId,
             patch: buildNewSessionDraftPatch({
-                authoringDraft: currentAuthoringDraft,
+                authoringDraft: { ...currentAuthoringDraft, directory: requestedSessionPath() },
                 machineId: selectedMachineId,
                 serverId: targetServerId ?? null,
                 text: promptStore.getPrompt(),
@@ -1719,7 +1865,7 @@ export function useNewSessionScreenModel(params?: Readonly<{ draftId?: string }>
             materializationIntent: 'launchInterrupted',
         });
         await flushSessionDraft({ scope: draftScope, address: draftAddress });
-    }, [currentAuthoringDraft, draftAddress, draftId, draftScope, promptStore, selectedMachineId, targetServerId]);
+    }, [currentAuthoringDraft, draftAddress, draftId, draftScope, promptStore, selectedMachineId, targetServerId, requestedSessionPath]);
 
     const onLaunchUserAttemptIdChange = React.useCallback((nextUserAttemptId: string | null) => {
         const normalized = typeof nextUserAttemptId === 'string' && nextUserAttemptId.trim().length > 0
@@ -1752,8 +1898,10 @@ export function useNewSessionScreenModel(params?: Readonly<{ draftId?: string }>
             machineId: selectedMachineId,
             targetServerId: targetServerId ?? null,
             sourceContext: sourceContextState.sourceContext,
+            hqSessionOptions,
+            hqWorktreeTask,
         });
-    }, [currentAuthoringDraft, selectedMachineId, sourceContextState.sourceContext, targetServerId]);
+    }, [currentAuthoringDraft, selectedMachineId, sourceContextState.sourceContext, targetServerId, hqSessionOptions, hqWorktreeTask]);
     const previousLaunchIntentSignatureRef = React.useRef(launchIntentSignature);
     React.useEffect(() => {
         if (previousLaunchIntentSignatureRef.current === launchIntentSignature) return;
@@ -1779,18 +1927,20 @@ export function useNewSessionScreenModel(params?: Readonly<{ draftId?: string }>
         subscribe: promptStore.subscribe,
     }), [promptStore]);
 
-    const { handleCreateSession, resumePersistedLaunchKey } = useCreateNewSession({
+    const { handleCreateSession: createSession, resumePersistedLaunchKey } = useCreateNewSession({
         router,
         selectedMachineId,
         selectedPath,
-        getRequestedPath,
+        getRequestedPath: requestedSessionPath,
+        prepareRequestedPath: hqRoutingActive ? prepareHqSessionPath : undefined,
+        hqSessionOptions,
         selectedMachine,
         setIsCreating,
         setIsResumeSupportChecking,
         checkoutCreationDraft,
         transcriptStorage,
-        settings,
-        useProfiles,
+        settings: sessionSettings,
+        useProfiles: useProfiles && !hqRoutingActive,
         selectedProfileId,
         profileMap,
         recentMachinePaths,
@@ -1828,6 +1978,11 @@ export function useNewSessionScreenModel(params?: Readonly<{ draftId?: string }>
         sourceContext: sourceContextState.sourceContext,
         preflightModels,
     });
+
+    const handleCreateSession = React.useCallback((...args: Parameters<typeof createSession>) => {
+        if (!hqCanCreate) return;
+        return createSession(...args);
+    }, [createSession, hqCanCreate]);
 
     const {
         connectionStatus,
@@ -2092,10 +2247,10 @@ export function useNewSessionScreenModel(params?: Readonly<{ draftId?: string }>
         resumeSessionId,
         resumePopover,
         isResumeSupportChecking,
-        useProfiles,
+        useProfiles: useProfiles && !hqRoutingActive,
         selectedProfileId,
         profilePopover,
-        agentInputExtraActionChips,
+        agentInputExtraActionChips: hqRoutingActive ? [...agentInputExtraActionChips, ...createHqChatRoutingChips(hqRoutingPickerProps)] : agentInputExtraActionChips,
         targetServerId,
         attachmentFlowId: effectiveAttachmentFlowId,
         resumePersistedLaunchKey,

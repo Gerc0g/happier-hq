@@ -27,6 +27,7 @@ import type { MachineSpawnReadiness } from '@/sync/domains/machines/identity/res
 import { buildNewSessionDraftPatch } from './newSessionDraftRepositoryAdapter';
 import { buildNewSessionDraftLocalState } from '@/sync/ops/sessionDrafts/newSessionDraftLocalState';
 
+import type { NewSessionDraft } from '@/sync/domains/state/persistence';
 import type { NewSessionPromptStore } from './newSessionPromptStore';
 
 type PersistedDraft = ReturnType<typeof buildPersistedNewSessionDraftFromAuthoringDraft>;
@@ -68,6 +69,7 @@ export function useNewSessionAuthoringState(params: Readonly<{
     draftScope: ServerAccountScope | null;
     draftId: string;
     launchUserAttemptId?: string | null;
+    hqRouteState?: Pick<NewSessionDraft, 'hqChatType' | 'hqWorktreeTask' | 'hqWorktreeCreation'>;
 }>): Readonly<{
     authoringContext: ReturnType<typeof buildNewSessionAuthoringContext>;
     currentAuthoringDraft: SessionAuthoringDraft;
@@ -184,7 +186,7 @@ export function useNewSessionAuthoringState(params: Readonly<{
         const launchUserAttemptId = typeof params.launchUserAttemptId === 'string'
             ? params.launchUserAttemptId.trim()
             : '';
-        return launchUserAttemptId ? { ...draft, launchUserAttemptId } : draft;
+        return { ...draft, ...params.hqRouteState, ...(launchUserAttemptId ? { launchUserAttemptId } : {}) };
     }, [
         buildCurrentAuthoringDraft,
         effectiveAutomationDraft,
@@ -193,6 +195,7 @@ export function useNewSessionAuthoringState(params: Readonly<{
         params.checkoutSelectionExplicit,
         params.getSessionOnlySecretValueEncByProfileIdByEnvVarName,
         params.launchUserAttemptId,
+        params.hqRouteState,
         params.selectedMachineId,
         params.selectedSecretId,
         params.selectedSecretIdByProfileIdByEnvVarName,

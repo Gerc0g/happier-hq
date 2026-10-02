@@ -1,4 +1,7 @@
 import React from 'react';
+import { View } from 'react-native';
+import { Item } from '@/components/ui/lists/Item';
+import type { HqAgentPreset } from '@/sync/domains/hq/hqAgentSettings';
 
 import type { AgentId } from '@/agents/catalog/catalog';
 import type { AgentInputExtraActionChip } from '@/components/sessions/agentInput/agentInputContracts';
@@ -19,6 +22,7 @@ export type UseNewSessionMcpSelectionResult = Readonly<{
 }>;
 
 export function useNewSessionMcpSelection(params: Readonly<{
+    hqPreset?: HqAgentPreset | null;
     selectedMachineId: string | null;
     selectedPath: string;
     selectedMachineName?: string | null;
@@ -45,7 +49,7 @@ export function useNewSessionMcpSelection(params: Readonly<{
     }, []);
 
     const refreshPreview = React.useCallback(async () => {
-        if (!mcpServersEnabled || !params.selectedMachineId || params.selectedPath.trim().length === 0) {
+        if (params.hqPreset !== undefined || !mcpServersEnabled || !params.selectedMachineId || params.selectedPath.trim().length === 0) {
             setMcpPreview(null);
             setMcpPreviewError(null);
             setMcpPreviewUnsupported(false);
@@ -96,6 +100,7 @@ export function useNewSessionMcpSelection(params: Readonly<{
         }
     }, [
         mcpServersEnabled,
+        params.hqPreset,
         params.agentType,
         params.mcpSelection,
         params.selectedMachineId,
@@ -107,7 +112,7 @@ export function useNewSessionMcpSelection(params: Readonly<{
     React.useEffect(() => {
         let cancelled = false;
         if (!previewDemanded) return;
-        if (!mcpServersEnabled || !params.selectedMachineId || params.selectedPath.trim().length === 0) {
+        if (params.hqPreset !== undefined || !mcpServersEnabled || !params.selectedMachineId || params.selectedPath.trim().length === 0) {
             setMcpPreview(null);
             setMcpPreviewError(null);
             setMcpPreviewUnsupported(false);
@@ -171,6 +176,7 @@ export function useNewSessionMcpSelection(params: Readonly<{
     }, [
         mcpServersEnabled,
         previewDemanded,
+        params.hqPreset,
         params.agentType,
         params.mcpSelection,
         params.selectedMachineId,
@@ -226,6 +232,7 @@ export function useNewSessionMcpSelection(params: Readonly<{
         mcpPreviewError,
         mcpPreviewLoading,
         mcpPreviewUnsupported,
+        params.hqPreset,
         params.agentType,
         params.mcpSelection,
         params.selectedMachineId,
@@ -234,6 +241,30 @@ export function useNewSessionMcpSelection(params: Readonly<{
     ]);
 
     const mcpChip = React.useMemo<AgentInputExtraActionChip | null>(() => {
+        if (params.hqPreset !== undefined) {
+            const servers = params.hqPreset?.mcp ?? [];
+            const selection = params.mcpSelection;
+            const enabled = (name: string, defaultEnabled: boolean) => !selection.forceExcludeServerIds.includes(name)
+                && (selection.forceIncludeServerIds.includes(name) || (selection.managedServersEnabled && defaultEnabled));
+            return createMcpActionChip({
+                label: chipLabel,
+                selectedCount: servers.filter(server => enabled(server.name, server.enabled)).length,
+                stabilityKey: JSON.stringify([servers, selection]),
+                popoverContent: () => <View testID="hq-session-mcp-list">
+                    {servers.map(server => <Item key={server.name} testID={`hq-session-mcp:${server.name}`}
+                        title={server.name} selected={enabled(server.name, server.enabled)} showChevron={false}
+                        onPress={() => params.setMcpSelection(previous => {
+                            const wasEnabled = !previous.forceExcludeServerIds.includes(server.name)
+                                && (previous.forceIncludeServerIds.includes(server.name) || (previous.managedServersEnabled && server.enabled));
+                            return { ...previous,
+                                forceIncludeServerIds: [...previous.forceIncludeServerIds.filter(name => name !== server.name), ...(!wasEnabled ? [server.name] : [])],
+                                forceExcludeServerIds: [...previous.forceExcludeServerIds.filter(name => name !== server.name), ...(wasEnabled ? [server.name] : [])],
+                            };
+                        })} />)}
+                    {servers.length === 0 ? <Item title={t('common.none')} showChevron={false} /> : null}
+                </View>,
+            });
+        }
         if (!mcpServersEnabled) return null;
 
         return createMcpActionChip({
@@ -250,7 +281,7 @@ export function useNewSessionMcpSelection(params: Readonly<{
             maxHeightCap: 760,
             maxWidthCap: 620,
         });
-    }, [chipLabel, chipStabilityKey, contentProps, demandPreview, mcpServersEnabled, selectedCount]);
+    }, [chipLabel, chipStabilityKey, contentProps, demandPreview, mcpServersEnabled, selectedCount, params.hqPreset, params.mcpSelection, params.setMcpSelection]);
 
     return { mcpChip, mcpPreview, mcpPreviewLoading };
 }
